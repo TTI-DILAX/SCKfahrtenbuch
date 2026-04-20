@@ -513,39 +513,107 @@ function fetchTripWeather(trip, cb) {
 
 /* -- Track: Map (Leaflet) + SVG fallback -- */
 var _mapInst = null;
-function showMap(containerId, pts, evs) {
-  if (!pts || pts.length < 2) {
-    var c = document.getElementById(containerId);
-    if(c) c.innerHTML = '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:13px">KEIN GPS-TRACK</div>';
-    return;
+var _currentPosMarker = null;
+var _currentPos = null;
+var _posWatch = null;
+
+function startPosWatch() {
+  if(!navigator.geolocation || _posWatch) return;
+  _posWatch = navigator.geolocation.watchPosition(function(pos) {
+    _currentPos = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+    // Update marker if map is open
+    if(_mapInst && _currentPosMarker) {
+      _currentPosMarker.setLatLng([_currentPos.lat, _currentPos.lng]);
+    } else if(_mapInst && _currentPos) {
+      _currentPosMarker = L.circleMarker([_currentPos.lat, _currentPos.lng], {
+        radius:9, color:"#fff", fillColor:"#1AABA0", fillOpacity:1, weight:2
+      }).bindPopup("Mein Standort").addTo(_mapInst);
+    }
+  }, function(){}, {enableHighAccuracy:true, maximumAge:5000, timeout:30000});
+}
+
+function destroyMap() {
+  if(_mapInst) {
+    try { _mapInst.remove(); } catch(e) {}
+    _mapInst = null;
+    _currentPosMarker = null;
   }
+}
+
+function showMap(containerId, pts, evs) {
   var container = document.getElementById(containerId);
   if(!container) return;
+
+  // Destroy previous map instance cleanly
+  destroyMap();
   container.innerHTML = "";
   container.style.height = "200px";
+
+  if(typeof L === "undefined") {
+    container.innerHTML = trackSVG(pts, evs);
+    return;
+  }
+
   try {
-    if(typeof L !== "undefined") {
-      if(_mapInst) { _mapInst.remove(); _mapInst=null; }
-      _mapInst = L.map(container, {zoomControl:false, attributionControl:false}).fitBounds(
-        pts.map(function(p){return [p.lat,p.lng];})
-      );
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{opacity:0.7}).addTo(_mapInst);
-      var coords = pts.map(function(p){return [p.lat,p.lng];});
-      L.polyline(coords,{color:"#1AABA0",weight:3}).addTo(_mapInst);
-      L.circleMarker(coords[0],{radius:6,color:"#1A8A50",fillColor:"#1A8A50",fillOpacity:1}).addTo(_mapInst);
-      L.circleMarker(coords[coords.length-1],{radius:6,color:"#C8A84B",fillColor:"#C8A84B",fillOpacity:1}).addTo(_mapInst);
-      if(evs) {
-        for(var i=0;i<evs.length;i++) {
-          L.circleMarker([evs[i].lat,evs[i].lng],{radius:5,color:"#E2C46A",fillColor:"#E2C46A",fillOpacity:1})
-            .bindPopup(esc(evs[i].type)+" "+(evs[i].name||"")).addTo(_mapInst);
-        }
-      }
-      setTimeout(function(){_mapInst.invalidateSize();},200);
-      return;
+    var hasPts = pts && pts.length >= 2;
+    var center = [profile.homePortLat, profile.homePortLon];
+    var zoom = 13;
+
+    if(_currentPos) { center = [_currentPos.lat, _currentPos.lng]; zoom = 14; }
+    if(hasPts) {
+      var lats = pts.map(function(p){return p.lat;});
+      var lons = pts.map(function(p){return p.lng;});
+      center = [(Math.min.apply(null,lats)+Math.max.apply(null,lats))/2,
+                (Math.min.apply(null,lons)+Math.max.apply(null,lons))/2];
     }
-  } catch(e) {}
-  // SVG fallback
-  container.innerHTML = trackSVG(pts,evs);
+
+    _mapInst = L.map(container, {
+      zoomControl: true,
+      attributionControl: false,
+      tap: true
+    }).setView(center, zoom);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      opacity: 0.85,
+      maxZoom: 18
+    }).addTo(_mapInst);
+
+    // Current position marker (teal pulsing dot)
+    if(_currentPos) {
+      _currentPosMarker = L.circleMarker([_currentPos.lat, _currentPos.lng], {
+        radius:9, color:"#fff", fillColor:"#1AABA0", fillOpacity:1, weight:2
+      }).bindPopup("Mein Standort").addTo(_mapInst);
+    }
+
+    // Home port marker
+    L.circleMarker([profile.homePortLat, profile.homePortLon], {
+      radius:6, color:"#C8A84B", fillColor:"#C8A84B", fillOpacity:0.6, weight:2
+    }).bindPopup("SCKR Heimathafen").addTo(_mapInst);
+
+    // Track if available
+    if(hasPts) {
+      var coords = pts.map(function(p){return [p.lat,p.lng];});
+      L.polyline(coords, {color:"#1AABA0", weight:3, opacity:0.9}).addTo(_mapInst);
+      L.circleMarker(coords[0], {radius:7,color:"#fff",fillColor:"#1A8A50",fillOpacity:1,weight:2})
+        .bindPopup("Start").addTo(_mapInst);
+      L.circleMarker(coords[coords.length-1], {radius:7,color:"#fff",fillColor:"#C8A84B",fillOpacity:1,weight:2})
+        .bindPopup("Ende").addTo(_mapInst);
+      _mapInst.fitBounds(coords, {padding:[20,20]});
+    }
+
+    // Infra events
+    if(evs) {
+      for(var i=0;i<evs.length;i++) {
+        L.circleMarker([evs[i].lat,evs[i].lng],{radius:5,color:"#E2C46A",fillColor:"#E2C46A",fillOpacity:1})
+          .bindPopup(esc(evs[i].type)+(evs[i].name?" ("+esc(evs[i].name)+")":"")).addTo(_mapInst);
+      }
+    }
+
+    setTimeout(function(){if(_mapInst) _mapInst.invalidateSize();}, 250);
+
+  } catch(e) {
+    container.innerHTML = trackSVG(pts, evs);
+  }
 }
 
 function trackSVG(pts,evs) {
@@ -876,7 +944,7 @@ function renderLive() {
     +(tracking?'<div class="live-dot pulse"></div>':'')
     +'</div>'
     +wxHtml
-    +'<div id="live-map" class="map-wrap" style="height:'+(trackPts.length>1?'200':'130')+'px"></div>';
+    +'<div id="live-map" class="map-wrap" style="height:200px"></div>';
 
   if(tracking) {
     html += '<div class="inst-grid">'
@@ -898,11 +966,10 @@ function renderLive() {
   document.getElementById("live").innerHTML = html;
 
   // Render map
-  if(trackPts.length > 1) {
-    showMap("live-map", trackPts, infraEvs);
-  } else if(!tracking) {
-    document.getElementById("live-map").innerHTML = '<div style="height:130px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:48px;opacity:.15">&#x26F5;</div>';
-  }
+  // Always show map - with track, current pos, or home port
+  setTimeout(function() {
+    showMap("live-map", trackPts.length>1 ? trackPts : null, infraEvs);
+  }, 50);
 }
 
 /* == TRIPS == */
@@ -1610,10 +1677,13 @@ function requestGPS() {
   navigator.geolocation.getCurrentPosition(
     function(pos) {
       gpsGranted = true;
-      toast("GPS AKTIV - " + pos.coords.latitude.toFixed(4) + ", " + pos.coords.longitude.toFixed(4));
-      // Now start geofence if enabled
+      _currentPos = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+      toast("GPS AKTIV");
+      // Start continuous position watch
+      startPosWatch();
+      // Start geofence if enabled
       if(profile.autoTrack) startGeofence();
-      // Load weather now that we have permission
+      // Load weather
       fetchCurrentWeather(function(wx){
         if(wx && currentTab==="live") renderLive();
       });
