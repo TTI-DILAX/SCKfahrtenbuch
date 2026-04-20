@@ -364,10 +364,10 @@ function degToDir(d) { return DIRS[Math.floor(((d+11.25)%360)/22.5)]; }
 
 /* -- Toast -- */
 var _tt;
-function toast(msg) {
+function toast(msg, ms) {
   var el=document.getElementById("toast");
   el.textContent=msg; el.classList.add("show");
-  clearTimeout(_tt); _tt=setTimeout(function(){el.classList.remove("show");},2600);
+  clearTimeout(_tt); _tt=setTimeout(function(){el.classList.remove("show");}, ms||2600);
 }
 
 /* -- Navigation -- */
@@ -725,6 +725,7 @@ async function startTracking(prefill) {
     if(currentTab==="live") renderLive();
   },1000);
   if(navigator.geolocation) {
+    gpsGranted = true;
     watchId=navigator.geolocation.watchPosition(function(pos){
       if(pos.coords.accuracy>60) return;
       var pt={t:new Date(pos.timestamp).toISOString(),lat:pos.coords.latitude,lng:pos.coords.longitude};
@@ -890,6 +891,8 @@ function renderLive() {
 
   html += '</div>'
     +'<button class="btn '+(tracking?'btn-red':'btn-green')+'" type="button" onclick="'+(tracking?'stopTracking()':'openNewTrip()')+'" style="margin-bottom:10px">'+(tracking?'FAHRT BEENDEN':'FAHRT STARTEN')+'</button>'
+    +(gpsGranted?'':'<div style="padding:12px 14px;border-radius:var(--r);background:rgba(200,168,75,.1);border:1px solid var(--bdr);margin-bottom:10px;font-size:13px;color:var(--acc2);text-align:center">GPS noch nicht erlaubt - bitte unten aktivieren</div>'
+    +'<button class="btn btn-gold" type="button" onclick="requestGPS()" style="margin-bottom:10px">GPS AKTIVIEREN</button>')
     +'<button class="btn btn-ghost" type="button" onclick="openManual()">+ MANUELL EINTRAGEN</button>';
 
   document.getElementById("live").innerHTML = html;
@@ -1108,7 +1111,7 @@ function renderSettings() {
   if(autoEl) autoEl.addEventListener("click",function(){
     profile.autoTrack=this.classList.contains("on");
     DB.set("profile",profile);
-    if(profile.autoTrack) startGeofence(); else stopGeofence();
+    // Geofence starts only after first user tap (iOS GPS permission requirement) else stopGeofence();
     toast(profile.autoTrack?"GEOFENCING AKTIV":"DEAKTIVIERT");
   });
   var syncEl = document.getElementById("pf-autosync");
@@ -1598,6 +1601,35 @@ async function exportExcel() {
   } catch(e) { toast("EXCEL-FEHLER: "+e.message); }
 }
 
+/* -- GPS Permission -- */
+var gpsGranted = false;
+
+function requestGPS() {
+  if (!navigator.geolocation) { toast("GPS NICHT VERFUEGBAR AUF DIESEM GERAET"); return; }
+  toast("GPS WIRD ANGEFRAGT...");
+  navigator.geolocation.getCurrentPosition(
+    function(pos) {
+      gpsGranted = true;
+      toast("GPS AKTIV - " + pos.coords.latitude.toFixed(4) + ", " + pos.coords.longitude.toFixed(4));
+      // Now start geofence if enabled
+      if(profile.autoTrack) startGeofence();
+      // Load weather now that we have permission
+      fetchCurrentWeather(function(wx){
+        if(wx && currentTab==="live") renderLive();
+      });
+      renderLive();
+    },
+    function(err) {
+      var msg = "GPS FEHLER";
+      if(err.code === 1) msg = "GPS VERWEIGERT - Bitte in iPhone Einstellungen > Safari > Standort erlauben";
+      if(err.code === 2) msg = "GPS NICHT VERFUEGBAR";
+      if(err.code === 3) msg = "GPS TIMEOUT - Nochmal versuchen";
+      toast(msg, 5000);
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
 /* -- INIT -- */
 (async function() {
   var p = await DB.get("profile");
@@ -1617,10 +1649,8 @@ async function exportExcel() {
   if(profile.autoTrack) startGeofence();
   if(profile.autoSync && profile.cloudApiKey) startAutoSync();
 
-  // Load current weather in background
-  fetchCurrentWeather(function(wx){
-    if(wx && currentTab==="live") renderLive();
-  });
+  // Weather loaded only after user interaction (iOS Safari requirement)
+  // fetchCurrentWeather is called when user taps "Fahrt starten" or weather button
 
   // Auto-fix: load weather for trips that are missing it
   for(var j=0;j<Math.min(trips.length,10);j++){
