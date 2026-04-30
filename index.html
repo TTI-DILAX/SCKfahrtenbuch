@@ -360,15 +360,11 @@ svg.track{width:100%;height:180px;display:block}
 (function(){
   var t=localStorage.getItem('sckr_theme')||'dark';
   document.documentElement.setAttribute('data-theme',t);
-  var acc=localStorage.getItem('sckr_color_acc');
-  var hdr=localStorage.getItem('sckr_color_hdr');
-  var sec=localStorage.getItem('sckr_color_sec');
-  if(acc||hdr||sec){
-    var r=document.documentElement;
-    if(acc) r.style.setProperty('--club-accent',acc);
-    if(hdr) r.style.setProperty('--club-header',hdr);
-    if(sec) r.style.setProperty('--club-second',sec);
-  }
+  var r=document.documentElement;
+  ['acc','hdr','sec'].forEach(function(k){
+    var v=localStorage.getItem('sckr_color_'+k+'_'+t);
+    if(v){var m={'acc':'--club-accent','hdr':'--club-header','sec':'--club-second'};r.style.setProperty(m[k],v);}
+  });
 })();
 </script>
 </head>
@@ -667,28 +663,60 @@ SCKR.admin.setTheme = function(theme) {
 
 SCKR.admin.applyColors = function(acc, hdr, sec) {
   var r = document.documentElement;
+  var theme = r.getAttribute("data-theme") || "dark";
   if(acc) { r.style.setProperty("--club-accent", acc); r.style.setProperty("--acc", acc); }
   if(hdr) { r.style.setProperty("--club-header", hdr); r.style.setProperty("--nav", hdr); }
   if(sec) { r.style.setProperty("--club-second", sec); r.style.setProperty("--acc2", sec); }
-  // Persist
-  if(acc) localStorage.setItem("sckr_color_acc", acc);
-  if(hdr) localStorage.setItem("sckr_color_hdr", hdr);
-  if(sec) localStorage.setItem("sckr_color_sec", sec);
+  if(acc) localStorage.setItem("sckr_color_acc_"+theme, acc);
+  if(hdr) localStorage.setItem("sckr_color_hdr_"+theme, hdr);
+  if(sec) localStorage.setItem("sckr_color_sec_"+theme, sec);
+};
+
+SCKR.admin.applyColorsByTheme = function() {
+  var theme = document.documentElement.getAttribute("data-theme") || "dark";
+  var b = SCKR.admin.state.branding;
+  var isLight = theme === "light";
+  var acc = localStorage.getItem("sckr_color_acc_"+theme) || (isLight ? b.colorAccL||"#C8102E" : b.colorAccD||"#E8304E");
+  var hdr = localStorage.getItem("sckr_color_hdr_"+theme) || (isLight ? b.colorHdrL||"#1a1a1a" : b.colorHdrD||"#0d0d0d");
+  var sec = localStorage.getItem("sckr_color_sec_"+theme) || (isLight ? b.colorSecL||"#8B0B1F" : b.colorSecD||"#C8102E");
+  SCKR.admin.applyColors(acc, hdr, sec);
+};
+
+SCKR.admin.previewSponLogo = function(input) {
+  var file = input.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    SCKR.admin._sponsorLogoB64 = e.target.result;
+    var prev = document.getElementById("ad-spon-logo-preview");
+    if(prev) prev.innerHTML = '<img src="'+e.target.result+'" style="max-height:40px;max-width:120px;border-radius:4px;border:1px solid var(--bdr)">';
+  };
+  reader.readAsDataURL(file);
 };
 
 SCKR.admin.previewColors = function() {
-  var acc = (document.getElementById("ad-color-acc")||{}).value;
-  var hdr = (document.getElementById("ad-color-hdr")||{}).value;
-  var sec = (document.getElementById("ad-color-sec")||{}).value;
+  var theme = document.documentElement.getAttribute("data-theme") || "dark";
+  var suffix = theme === "dark" ? "-d" : "-l";
+  var acc = (document.getElementById("ad-acc"+suffix)||{}).value;
+  var hdr = (document.getElementById("ad-hdr"+suffix)||{}).value;
+  var sec = (document.getElementById("ad-sec"+suffix)||{}).value;
   SCKR.admin.applyColors(acc, hdr, sec);
-  SCKR.core.ui.toast("VORSCHAU AKTIV");
+  SCKR.core.ui.toast("VORSCHAU: "+theme.toUpperCase()+" MODUS");
 };
 
 SCKR.admin.resetColors = function() {
-  SCKR.admin.applyColors("#C8102E", "#1a1a1a", "#8B0B1F");
-  localStorage.removeItem("sckr_color_acc");
-  localStorage.removeItem("sckr_color_hdr");
-  localStorage.removeItem("sckr_color_sec");
+  var defaults = {
+    light: {acc:"#C8102E", hdr:"#1a1a1a", sec:"#8B0B1F"},
+    dark:  {acc:"#E8304E", hdr:"#0d0d0d", sec:"#C8102E"}
+  };
+  ["light","dark"].forEach(function(t) {
+    localStorage.removeItem("sckr_color_acc_"+t);
+    localStorage.removeItem("sckr_color_hdr_"+t);
+    localStorage.removeItem("sckr_color_sec_"+t);
+  });
+  var theme = document.documentElement.getAttribute("data-theme") || "dark";
+  var d = defaults[theme];
+  SCKR.admin.applyColors(d.acc, d.hdr, d.sec);
   SCKR.core.ui.toast("STANDARDFARBEN ZURUECK");
 };
 
@@ -706,19 +734,43 @@ SCKR.admin.openPanel = function() {
     + (b.logoB64?'<div class="fld"><button type="button" onclick="SCKR.admin.removeLogo()" class="btn btn-ghost" style="padding:10px;font-size:13px">LOGO AUF STANDARD</button></div>':'')
     + '</div>'
 
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Vereinsfarben (3 Farben)</span></div>'
-    + '<div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
-    + '<div><div style="font-size:10px;color:var(--mut);margin-bottom:5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Akzent</div>'
-    + '<input type="color" id="ad-color-acc" value="'+(b.colorAcc||"#C8102E")+'" style="width:100%;height:34px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;background:var(--bg3);padding:2px">'
-    + '<div style="font-size:10px;color:var(--mut);margin-top:3px">Buttons, Badges</div></div>'
-    + '<div><div style="font-size:10px;color:var(--mut);margin-bottom:5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Header</div>'
-    + '<input type="color" id="ad-color-hdr" value="'+(b.colorHdr||"#1a1a1a")+'" style="width:100%;height:34px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;background:var(--bg3);padding:2px">'
-    + '<div style="font-size:10px;color:var(--mut);margin-top:3px">Nav, Tab-Bar</div></div>'
-    + '<div><div style="font-size:10px;color:var(--mut);margin-bottom:5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Sekundaer</div>'
-    + '<input type="color" id="ad-color-sec" value="'+(b.colorSec||"#8B0B1F")+'" style="width:100%;height:34px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;background:var(--bg3);padding:2px">'
-    + '<div style="font-size:10px;color:var(--mut);margin-top:3px">Verlauf, Icons</div></div>'
+    + '<div class="pnl"><div class="phd"><span class="phd-t">Vereinsfarben - Hell &amp; Dunkel</span></div>'
+    + '<div style="padding:8px 14px 4px;font-size:11px;color:var(--mut)">Getrennte Farben fuer Hell- und Dunkel-Modus. Linke Spalte = Hell, rechte Spalte = Dunkel.</div>'
+
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--bdr2)">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">AKZENT</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-acc-l" value="'+(b.colorAccL||"#C8102E")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
     + '</div>'
-    + '<div style="padding:0 14px 12px;display:flex;gap:8px">'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-acc-d" value="'+(b.colorAccD||"#E8304E")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div></div>'
+
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--bdr2)">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">HEADER</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-hdr-l" value="'+(b.colorHdrL||"#1a1a1a")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-hdr-d" value="'+(b.colorHdrD||"#0d0d0d")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div></div>'
+
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">SEKUND.</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-sec-l" value="'+(b.colorSecL||"#8B0B1F")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-sec-d" value="'+(b.colorSecD||"#C8102E")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div></div>'
+
+    + '<div style="padding:10px 14px;display:flex;gap:8px">'
     + '<button type="button" onclick="SCKR.admin.previewColors()" class="btn btn-ghost" style="flex:1;padding:9px;font-size:12px">VORSCHAU</button>'
     + '<button type="button" onclick="SCKR.admin.resetColors()" class="btn btn-ghost" style="flex:1;padding:9px;font-size:12px">RESET</button>'
     + '</div></div>'
@@ -739,9 +791,10 @@ SCKR.admin.openPanel = function() {
           +'<button type="button" onclick="SCKR.admin.removeBannerSpon('+i+')" style="padding:4px 10px;border-radius:4px;border:none;background:rgba(192,57,43,.2);color:#e74c3c;cursor:pointer;font-size:11px">X</button></div>';
       }).join('')
     + '<div class="fld"><label class="lbl">Sponsor-Text</label><input class="inp" id="ad-spon-new" placeholder="z.B. Sparkasse KW dankt den Seglern"></div>'
-    + '<div class="fld"><label class="lbl">Logo-URL (optional)</label><input class="inp" id="ad-spon-logo" placeholder="https://sponsor.de/logo.png"></div>'
-    + '<div class="fld"><label class="lbl">Website-Link (optional)</label><input class="inp" id="ad-spon-link" placeholder="https://sparkasse-kw.de"></div>'
-    + '<div class="fld"><button type="button" onclick="SCKR.admin.addBannerSpon()" class="btn btn-ghost" style="padding:10px;font-size:13px">+ SPONSOR HINZUFUEGEN</button></div>'
+    +'<div class="fld"><label class="lbl">Logo hochladen (Datei)</label><input type="file" id="ad-spon-logo-file" accept="image/*" style="width:100%;padding:4px 0;font-size:13px;color:var(--off)" onchange="SCKR.admin.previewSponLogo(this)"><div id="ad-spon-logo-preview" style="margin-top:6px;min-height:20px"></div></div>'
+    +'<div class="fld"><label class="lbl">Oder Logo-URL</label><input class="inp" id="ad-spon-logo" placeholder="https://sponsor.de/logo.png"></div>'
+    +'<div class="fld"><label class="lbl">Website-Link (optional)</label><input class="inp" id="ad-spon-link" placeholder="https://sparkasse-kw.de"></div>'
+    '<div class="fld"><button type="button" onclick="SCKR.admin.addBannerSpon()" class="btn btn-ghost" style="padding:10px;font-size:13px">+ SPONSOR HINZUFUEGEN</button></div>'
     + '</div>'
 
     + '<div class="pnl"><div class="phd"><span class="phd-t">Footer-Sponsor</span></div>'
@@ -774,10 +827,14 @@ SCKR.admin.openPanel = function() {
 SCKR.admin.saveAll = async function() {
   var b = SCKR.admin.state.branding;
   var newText = (document.getElementById("ad-footer")||{}).value||"";
-  b.colorAcc = (document.getElementById("ad-color-acc")||{}).value || b.colorAcc || "#C8102E";
-  b.colorHdr = (document.getElementById("ad-color-hdr")||{}).value || b.colorHdr || "#1a1a1a";
-  b.colorSec = (document.getElementById("ad-color-sec")||{}).value || b.colorSec || "#8B0B1F";
-  SCKR.admin.applyColors(b.colorAcc, b.colorHdr, b.colorSec);
+  var g = function(id){ return (document.getElementById(id)||{}).value||""; };
+  b.colorAccL = g("ad-acc-l") || b.colorAccL || "#C8102E";
+  b.colorAccD = g("ad-acc-d") || b.colorAccD || "#E8304E";
+  b.colorHdrL = g("ad-hdr-l") || b.colorHdrL || "#1a1a1a";
+  b.colorHdrD = g("ad-hdr-d") || b.colorHdrD || "#0d0d0d";
+  b.colorSecL = g("ad-sec-l") || b.colorSecL || "#8B0B1F";
+  b.colorSecD = g("ad-sec-d") || b.colorSecD || "#C8102E";
+  SCKR.admin.applyColorsByTheme();
   b.clubName = (document.getElementById("ad-club")||{}).value||b.clubName;
   b.appTitle = (document.getElementById("ad-title")||{}).value||b.appTitle;
   SCKR.admin.state.sponsors.footer = newText ? [newText] : [];
@@ -798,9 +855,12 @@ SCKR.admin.saveAll = async function() {
 SCKR.admin.addBannerSpon = async function() {
   var text = (document.getElementById("ad-spon-new")||{}).value;
   if(!text) return;
-  var logo = (document.getElementById("ad-spon-logo")||{}).value||"";
+  // Logo: bevorzuge hochgeladene Datei (b64), sonst URL
+  var logoB64 = SCKR.admin._sponsorLogoB64 || "";
+  var logoUrl = logoB64 ? "" : ((document.getElementById("ad-spon-logo")||{}).value||"");
   var link = (document.getElementById("ad-spon-link")||{}).value||"";
-  SCKR.admin.state.sponsors.banner.push({text:text, logoUrl:logo, link:link});
+  SCKR.admin._sponsorLogoB64 = null; // reset
+  SCKR.admin.state.sponsors.banner.push({text:text, logoB64:logoB64, logoUrl:logoUrl, link:link});
   await SCKR.core.storage.set("admin_sponsors", SCKR.admin.state.sponsors);
   SCKR.admin.openPanel();
 };
@@ -826,9 +886,7 @@ SCKR.admin.lock = function() {
 
 SCKR.admin.applyBranding = function() {
   var b = SCKR.admin.state.branding;
-  if(b.colorAcc || b.colorHdr || b.colorSec) {
-    SCKR.admin.applyColors(b.colorAcc||"#C8102E", b.colorHdr||"#1a1a1a", b.colorSec||"#8B0B1F");
-  }
+  SCKR.admin.applyColorsByTheme();
   var c = document.getElementById("club-name");
   var t = document.getElementById("app-title");
   if(c) c.textContent = b.clubName;
@@ -882,6 +940,8 @@ SCKR.admin.init = async function() {
   if(apik) SCKR.config.anthropicAPIKey = apik;
   var b = await SCKR.core.storage.get("admin_branding");
   if(b) SCKR.admin.state.branding = b;
+  // Apply correct colors for current theme immediately
+  SCKR.admin.applyColorsByTheme();
   var s = await SCKR.core.storage.get("admin_sponsors");
   if(s) SCKR.admin.state.sponsors = s;
   var f = await SCKR.core.storage.get("admin_features");
