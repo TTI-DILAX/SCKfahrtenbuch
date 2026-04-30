@@ -95,8 +95,7 @@ a{color:var(--acc2)}
 
 /* LIGHT MODE OVERRIDES */
 [data-theme="light"] body{background:#F4F6F9}
-[data-theme="light"] .tab{color:#5a6a8a}
-[data-theme="light"] .tab.active{color:var(--text2)}
+[data-theme="light"] /* Tab colors handled by main .tab rule */
 [data-theme="light"] .prow .lv{color:#3a4a6a}
 [data-theme="light"] .trip-card:active{background:#f0f4ff}
 [data-theme="light"] .gauge-val,[data-theme="light"] .hero-num{color:var(--club-blue)}
@@ -118,8 +117,8 @@ a{color:var(--acc2)}
 #hdr-logo{width:44px;height:44px;flex-shrink:0;border-radius:50%;cursor:pointer;border:1.5px solid var(--acc3);filter:drop-shadow(0 0 8px rgba(200,168,75,.35));display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg2)}
 #hdr-logo img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .hdr-text{flex:1;min-width:0}
-.hdr-text .club{font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.7);line-height:1}
-.hdr-text .title{font-family:var(--fs);font-size:15px;font-weight:700;color:#ffffff;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr-text .club{font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(var(--club-nav-text,255,255,255),.7);line-height:1}
+.hdr-text .title{font-family:var(--fs);font-size:15px;font-weight:700;color:var(--nav-text,#fff);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hdr-badge{font-family:var(--fd);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--text2);background:rgba(200,168,75,.12);border:1px solid var(--bdr);border-radius:4px;padding:3px 9px;cursor:pointer}
 
 /* SPONSOR BANNER */
@@ -129,9 +128,9 @@ a{color:var(--acc2)}
 
 /* TABS */
 .tabs{display:grid;grid-template-columns:repeat(4,1fr)}
-.tab{background:var(--bg3);border:none;border-top:2px solid transparent;color:var(--mut);font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:10px 4px 11px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:color .15s}
+.tab{background:transparent;border:none;border-top:2px solid transparent;color:rgba(255,255,255,.5);font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:10px 4px 11px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:color .15s}
 .tab svg{width:18px;height:18px;fill:currentColor}
-.tab.active{color:var(--text2);border-top-color:var(--text2)}
+.tab.active{color:#fff;border-top-color:var(--acc)}
 
 /* SCREENS */
 .screen{padding:16px 14px calc(100px + env(safe-area-inset-bottom));display:none}
@@ -302,7 +301,7 @@ svg.track{width:100%;height:180px;display:block}
 .pts-box{background:linear-gradient(135deg,#03101e,#0d2340);border:1px solid var(--bdr);border-radius:var(--r2);padding:18px;text-align:center;margin-top:12px}
 
 /* TAB BAR FIXED BOTTOM ALWAYS VISIBLE */
-.tabbar-fixed{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;background:var(--hdr-bg);border-top:2px solid var(--acc);z-index:50;padding-bottom:env(safe-area-inset-bottom)}
+.tabbar-fixed{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;background:var(--nav);border-top:3px solid var(--acc);z-index:50;padding-bottom:env(safe-area-inset-bottom)}
 
 /* LANDSCAPE */
 @media(orientation:landscape) and (max-height:500px){
@@ -335,8 +334,8 @@ svg.track{width:100%;height:180px;display:block}
 [data-theme="light"] .lxs { color: var(--acc); }
 [data-theme="light"] .phd-t { color: var(--text2); }
 [data-theme="light"] .phd::before { background: var(--acc); }
-[data-theme="light"] .tab { color: rgba(255,255,255,.5); }
-[data-theme="light"] .tab.active { color: #fff; }
+[data-theme="light"] .tab { color: rgba(var(--club-nav-text, 255,255,255),.45); }
+[data-theme="light"] .tab.active { color: var(--nav-text, #fff); border-top-color: var(--acc); }
 [data-theme="light"] select.inp option { background: #fff; color: #1a1a1a; }
 [data-theme="light"] .btn-gold { background: var(--acc); color: #fff; box-shadow: 0 4px 16px rgba(200,16,46,.25); }
 [data-theme="light"] .btn-green { background: #16a34a; }
@@ -357,13 +356,20 @@ svg.track{width:100%;height:180px;display:block}
 [data-theme="light"] body { background: var(--bg); }
 </style>
 <script>
+// Register Service Worker for offline map tiles
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function(){});
+}
+</script>
+<script>
 (function(){
   var t=localStorage.getItem('sckr_theme')||'dark';
   document.documentElement.setAttribute('data-theme',t);
   var r=document.documentElement;
-  ['acc','hdr','sec'].forEach(function(k){
+  var colorMap={'acc':'--club-accent','hdr':'--club-header','sec':'--club-second','navtxt':'--club-nav-text','txt':'--club-text'};
+  Object.keys(colorMap).forEach(function(k){
     var v=localStorage.getItem('sckr_color_'+k+'_'+t);
-    if(v){var m={'acc':'--club-accent','hdr':'--club-header','sec':'--club-second'};r.style.setProperty(m[k],v);}
+    if(v) r.style.setProperty(colorMap[k],v);
   });
 })();
 </script>
@@ -661,25 +667,32 @@ SCKR.admin.setTheme = function(theme) {
   if(btn) btn.textContent = theme === "dark" ? "&#9728;" : "&#9790;";
 };
 
-SCKR.admin.applyColors = function(acc, hdr, sec) {
+SCKR.admin.applyColors = function(acc, hdr, sec, navTxt, txt) {
   var r = document.documentElement;
-  var theme = r.getAttribute("data-theme") || "dark";
-  if(acc) { r.style.setProperty("--club-accent", acc); r.style.setProperty("--acc", acc); }
-  if(hdr) { r.style.setProperty("--club-header", hdr); r.style.setProperty("--nav", hdr); }
-  if(sec) { r.style.setProperty("--club-second", sec); r.style.setProperty("--acc2", sec); }
-  if(acc) localStorage.setItem("sckr_color_acc_"+theme, acc);
-  if(hdr) localStorage.setItem("sckr_color_hdr_"+theme, hdr);
-  if(sec) localStorage.setItem("sckr_color_sec_"+theme, sec);
+  if(acc)    { r.style.setProperty("--club-accent",   acc);    r.style.setProperty("--acc", acc); }
+  if(hdr)    { r.style.setProperty("--club-header",   hdr);    r.style.setProperty("--nav", hdr); }
+  if(sec)    { r.style.setProperty("--club-second",   sec);    r.style.setProperty("--acc2", sec); }
+  if(navTxt) { r.style.setProperty("--club-nav-text", navTxt); r.style.setProperty("--nav-text", navTxt); }
+  if(txt)    { r.style.setProperty("--club-text",     txt);    r.style.setProperty("--wh", txt); }
 };
 
 SCKR.admin.applyColorsByTheme = function() {
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
   var b = SCKR.admin.state.branding;
   var isLight = theme === "light";
-  var acc = localStorage.getItem("sckr_color_acc_"+theme) || (isLight ? b.colorAccL||"#C8102E" : b.colorAccD||"#E8304E");
-  var hdr = localStorage.getItem("sckr_color_hdr_"+theme) || (isLight ? b.colorHdrL||"#1a1a1a" : b.colorHdrD||"#0d0d0d");
-  var sec = localStorage.getItem("sckr_color_sec_"+theme) || (isLight ? b.colorSecL||"#8B0B1F" : b.colorSecD||"#C8102E");
-  SCKR.admin.applyColors(acc, hdr, sec);
+  // localStorage hat Vorrang (wurde durch saveAll gesetzt)
+  var acc = localStorage.getItem("sckr_color_acc_"+theme);
+  var hdr = localStorage.getItem("sckr_color_hdr_"+theme);
+  var sec = localStorage.getItem("sckr_color_sec_"+theme);
+  // Fallback auf branding-Objekt, dann auf Defaults
+  if(!acc) acc = isLight ? (b.colorAccL||"#C8102E") : (b.colorAccD||"#E8304E");
+  if(!hdr) hdr = isLight ? (b.colorHdrL||"#1a1a1a") : (b.colorHdrD||"#0d0d0d");
+  if(!sec) sec = isLight ? (b.colorSecL||"#8B0B1F") : (b.colorSecD||"#C8102E");
+  var navTxt = localStorage.getItem("sckr_color_navtxt_"+theme);
+  var txt    = localStorage.getItem("sckr_color_txt_"+theme);
+  if(!navTxt) navTxt = isLight ? (b.colorNavTxtL||"#FFFFFF") : (b.colorNavTxtD||"#FFFFFF");
+  if(!txt)    txt    = isLight ? (b.colorTxtL   ||"#1a1a1a") : (b.colorTxtD   ||"#F0F0F0");
+  SCKR.admin.applyColors(acc, hdr, sec, navTxt, txt);
 };
 
 SCKR.admin.previewSponLogo = function(input) {
@@ -696,27 +709,34 @@ SCKR.admin.previewSponLogo = function(input) {
 
 SCKR.admin.previewColors = function() {
   var theme = document.documentElement.getAttribute("data-theme") || "dark";
-  var suffix = theme === "dark" ? "-d" : "-l";
-  var acc = (document.getElementById("ad-acc"+suffix)||{}).value;
-  var hdr = (document.getElementById("ad-hdr"+suffix)||{}).value;
-  var sec = (document.getElementById("ad-sec"+suffix)||{}).value;
-  SCKR.admin.applyColors(acc, hdr, sec);
-  SCKR.core.ui.toast("VORSCHAU: "+theme.toUpperCase()+" MODUS");
+  var sfx = theme === "dark" ? "-d" : "-l";
+  var acc = (document.getElementById("ad-acc"+sfx)||{}).value || "";
+  var hdr = (document.getElementById("ad-hdr"+sfx)||{}).value || "";
+  var sec = (document.getElementById("ad-sec"+sfx)||{}).value || "";
+  if(!acc && !hdr && !sec) {
+    SCKR.core.ui.toast("KEINE FARBEN AUSGEWAEHLT");
+    return;
+  }
+  var navTxt = (document.getElementById("ad-navtxt"+sfx)||{}).value || "";
+  var txt    = (document.getElementById("ad-txt"+sfx)||{}).value || "";
+  SCKR.admin.applyColors(acc||undefined, hdr||undefined, sec||undefined, navTxt||undefined, txt||undefined);
+  SCKR.core.ui.toast("VORSCHAU AKTIV - Tippe Speichern um zu behalten");
 };
 
 SCKR.admin.resetColors = function() {
-  var defaults = {
-    light: {acc:"#C8102E", hdr:"#1a1a1a", sec:"#8B0B1F"},
-    dark:  {acc:"#E8304E", hdr:"#0d0d0d", sec:"#C8102E"}
-  };
+  // Loesche alle gespeicherten Farben
   ["light","dark"].forEach(function(t) {
     localStorage.removeItem("sckr_color_acc_"+t);
     localStorage.removeItem("sckr_color_hdr_"+t);
     localStorage.removeItem("sckr_color_sec_"+t);
   });
-  var theme = document.documentElement.getAttribute("data-theme") || "dark";
-  var d = defaults[theme];
-  SCKR.admin.applyColors(d.acc, d.hdr, d.sec);
+  // Loesche auch im branding-Objekt
+  var b = SCKR.admin.state.branding;
+  delete b.colorAccL; delete b.colorAccD;
+  delete b.colorHdrL; delete b.colorHdrD;
+  delete b.colorSecL; delete b.colorSecD;
+  // Wende Defaults an
+  SCKR.admin.applyColorsByTheme();
   SCKR.core.ui.toast("STANDARDFARBEN ZURUECK");
 };
 
@@ -768,6 +788,28 @@ SCKR.admin.openPanel = function() {
     + '<div>'
     +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
     +   '<input type="color" id="ad-sec-d" value="'+(b.colorSecD||"#C8102E")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div></div>'
+
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--bdr2)">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">NAV-TEXT</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-navtxt-l" value="'+(b.colorNavTxtL||"#FFFFFF")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-navtxt-d" value="'+(b.colorNavTxtD||"#FFFFFF")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div></div>'
+
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">SCHRIFT</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-txt-l" value="'+(b.colorTxtL||"#1a1a1a")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
+    + '</div>'
+    + '<div>'
+    +   '<div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-txt-d" value="'+(b.colorTxtD||"#F0F0F0")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
     + '</div></div>'
 
     + '<div style="padding:10px 14px;display:flex;gap:8px">'
@@ -828,13 +870,34 @@ SCKR.admin.saveAll = async function() {
   var b = SCKR.admin.state.branding;
   var newText = (document.getElementById("ad-footer")||{}).value||"";
   var g = function(id){ return (document.getElementById(id)||{}).value||""; };
-  b.colorAccL = g("ad-acc-l") || b.colorAccL || "#C8102E";
-  b.colorAccD = g("ad-acc-d") || b.colorAccD || "#E8304E";
-  b.colorHdrL = g("ad-hdr-l") || b.colorHdrL || "#1a1a1a";
-  b.colorHdrD = g("ad-hdr-d") || b.colorHdrD || "#0d0d0d";
-  b.colorSecL = g("ad-sec-l") || b.colorSecL || "#8B0B1F";
-  b.colorSecD = g("ad-sec-d") || b.colorSecD || "#C8102E";
-  SCKR.admin.applyColorsByTheme();
+  // Lese aktuelle Werte aus Farbwaehlern
+  var accL = g("ad-acc-l"); var accD = g("ad-acc-d");
+  var hdrL = g("ad-hdr-l"); var hdrD = g("ad-hdr-d");
+  var secL = g("ad-sec-l"); var secD = g("ad-sec-d");
+  // Speichere in branding
+  if(accL) b.colorAccL = accL; if(accD) b.colorAccD = accD;
+  if(hdrL) b.colorHdrL = hdrL; if(hdrD) b.colorHdrD = hdrD;
+  if(secL) b.colorSecL = secL; if(secD) b.colorSecD = secD;
+  // Speichere in localStorage (per Modus)
+  var theme = document.documentElement.getAttribute("data-theme") || "dark";
+  var isLight = theme === "light";
+  var curAcc = isLight ? b.colorAccL : b.colorAccD;
+  var curHdr = isLight ? b.colorHdrL : b.colorHdrD;
+  var curSec = isLight ? b.colorSecL : b.colorSecD;
+  localStorage.setItem("sckr_color_acc_"+theme, curAcc||"");
+  localStorage.setItem("sckr_color_hdr_"+theme, curHdr||"");
+  localStorage.setItem("sckr_color_sec_"+theme, curSec||"");
+  // Text-Farben
+  var navTxtL = g("ad-navtxt-l"); var navTxtD = g("ad-navtxt-d");
+  var txtL    = g("ad-txt-l");    var txtD    = g("ad-txt-d");
+  if(navTxtL) b.colorNavTxtL = navTxtL; if(navTxtD) b.colorNavTxtD = navTxtD;
+  if(txtL)    b.colorTxtL    = txtL;    if(txtD)    b.colorTxtD    = txtD;
+  var curNavTxt = isLight ? (b.colorNavTxtL||"#FFFFFF")  : (b.colorNavTxtD||"#FFFFFF");
+  var curTxt    = isLight ? (b.colorTxtL   ||"#1a1a1a")  : (b.colorTxtD   ||"#F0F0F0");
+  localStorage.setItem("sckr_color_navtxt_"+theme, curNavTxt);
+  localStorage.setItem("sckr_color_txt_"+theme, curTxt);
+  // Wende sofort an
+  SCKR.admin.applyColors(curAcc, curHdr, curSec, curNavTxt, curTxt);
   b.clubName = (document.getElementById("ad-club")||{}).value||b.clubName;
   b.appTitle = (document.getElementById("ad-title")||{}).value||b.appTitle;
   SCKR.admin.state.sponsors.footer = newText ? [newText] : [];
@@ -1247,6 +1310,7 @@ SCKR.fahrtenbuch.startTracking = async function(prefill) {
   st.currentSegment = {mode:"Segel", startIdx:0, km:0};
   st.startT = Date.now();
   SCKR.core.ui.closeSheet();
+  if(navigator.vibrate) navigator.vibrate(60);
 
   st.timerId = setInterval(function() {
     st.elapsed = Math.floor((Date.now()-st.startT)/1000);
@@ -1347,6 +1411,7 @@ SCKR.fahrtenbuch.stopTracking = async function() {
 
   await SCKR.fahrtenbuch.saveTrip(saved);
   SCKR.core.ui.toast("FAHRT GESPEICHERT - OSM & WETTER LADEN...");
+  if(navigator.vibrate) navigator.vibrate([100,50,100]);
   SCKR.core.events.emit("trip:saved", saved);
 
   SCKR.fahrtenbuch.detectOSM(saved).then(function(){ SCKR.fahrtenbuch.saveTrip(saved); }).catch(function(){});
@@ -1364,6 +1429,7 @@ SCKR.fahrtenbuch.tagInfra = function(type) {
   if(type==="Bruecke") st.activeTrip.bridges = (st.activeTrip.bridges||0)+1;
   else st.activeTrip.locks = (st.activeTrip.locks||0)+1;
   SCKR.core.ui.toast(type+" EINGETRAGEN");
+  if(navigator.vibrate) navigator.vibrate(40);
 };
 
 /* -- Geofence -- */
