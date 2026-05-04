@@ -600,7 +600,7 @@ SCKR.core.fmt = {
   date: function(d) { return new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"short",year:"numeric"}); },
   time: function(s) { if(s<3600) return Math.floor(s/60)+"m "+s%60+"s"; return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m"; },
   dist: function(km,cat) { if(cat==="Binnen") return km.toFixed(2)+" km"; return (km/1.852).toFixed(2)+" sm"; },
-  speed: function(ms) { return (ms*1.94384).toFixed(1); },  // m/s to knots
+  speed: function(ms) { return (ms*3.6).toFixed(1); },  // m/s to km/h
   compass: function(deg) {
     var dirs=["N","NNO","NO","ONO","O","OSO","SO","SSO","S","SSW","SW","WSW","W","WNW","NW","NNW"];
     return dirs[Math.floor(((deg+11.25)%360)/22.5)];
@@ -1039,11 +1039,24 @@ SCKR.fahrtenbuch.state = {
   liveKm: 0,
   currentSpeed: 0,        // m/s
   maxSpeed: 0,
+  avgSpeed: 0,            // km/h Durchschnitt (nur Fahrt, keine Pause)
   currentHeading: 0,      // degrees
   lastPosTime: 0,
   watchId: null,
   timerId: null,
   startT: null,
+  // Pause & Anker
+  isPaused: false,
+  pauseStart: null,
+  totalPauseMs: 0,
+  anchorEvents: [],       // [{lat,lng,ts,durationMs}]
+  anchorStart: null,
+  // Segmente je Antrieb
+  segelKm: 0,
+  motorKm: 0,
+  segelMs: 0,             // Zeit unter Segel
+  motorMs: 0,             // Zeit unter Motor
+  speedSamples: [],       // fuer Durchschnitt
   geoWatchId: null,
   geoLastDist: null,
   geoAutoStarted: false,
@@ -1312,6 +1325,14 @@ SCKR.fahrtenbuch.startTracking = async function(prefill) {
   SCKR.core.ui.closeSheet();
   if(navigator.vibrate) navigator.vibrate(60);
 
+  // Einmaliger Auto-Lock Hinweis pro Sitzung
+  if(!sessionStorage.getItem("sckr_lock_hint")) {
+    sessionStorage.setItem("sckr_lock_hint","1");
+    setTimeout(function(){
+      SCKR.core.ui.toast("TIPP: Autolock deaktivieren! Einstellungen > Bildschirm > Nie");
+    }, 2500);
+  }
+
   st.timerId = setInterval(function() {
     st.elapsed = Math.floor((Date.now()-st.startT)/1000);
     var km=0;
@@ -1350,6 +1371,51 @@ SCKR.fahrtenbuch.startTracking = async function(prefill) {
 
   await SCKR.fahrtenbuch.saveTrip(trip);
   SCKR.fahrtenbuch.render.live();
+};
+
+SCKR.fahrtenbuch.togglePause = function() {
+  var st = SCKR.fahrtenbuch.state;
+  if(!st.running) return;
+  if(!st.isPaused) {
+    st.isPaused = true;
+    st.pauseStart = Date.now();
+    if(navigator.vibrate) navigator.vibrate([40,30,40]);
+    SCKR.core.ui.toast("PAUSE GESTARTET");
+  } else {
+    st.totalPauseMs += Date.now() - st.pauseStart;
+    st.pauseStart = null;
+    st.isPaused = false;
+    if(navigator.vibrate) navigator.vibrate(60);
+    SCKR.core.ui.toast("FAHRT FORTGESETZT");
+  }
+  SCKR.fahrtenbuch.renderLive();
+};
+
+SCKR.fahrtenbuch.setAnchor = function() {
+  var st = SCKR.fahrtenbuch.state;
+  if(!st.running || !st.currentPos) { SCKR.core.ui.toast("GPS NICHT AKTIV"); return; }
+  if(!st.isPaused) SCKR.fahrtenbuch.togglePause(); // Auto-Pause bei Anker
+  st.anchorStart = Date.now();
+  st.anchorEvents.push({
+    lat: st.currentPos.lat,
+    lng: st.currentPos.lng,
+    ts: Date.now(),
+    durationMs: 0
+  });
+  if(navigator.vibrate) navigator.vibrate([60,40,60,40,60]);
+  SCKR.core.ui.toast("ANKER GESETZT");
+  SCKR.fahrtenbuch.renderLive();
+};
+
+SCKR.fahrtenbuch.liftAnchor = function() {
+  var st = SCKR.fahrtenbuch.state;
+  var last = st.anchorEvents[st.anchorEvents.length-1];
+  if(last && last.durationMs === 0) {
+    last.durationMs = Date.now() - last.ts;
+  }
+  if(st.isPaused) SCKR.fahrtenbuch.togglePause(); // Auto-Resume
+  SCKR.core.ui.toast("ANKER GELICHTET");
+  SCKR.fahrtenbuch.renderLive();
 };
 
 SCKR.fahrtenbuch.toggleProp = function(mode) {
@@ -1404,6 +1470,17 @@ SCKR.fahrtenbuch.stopTracking = async function() {
     st.activeTrip.motorSm = Math.round(motorKm/1.852*100)/100;
   }
 
+  // Save new stat fields from state
+  st.activeTrip.avgSpeed  = Math.round((st.avgSpeed||0)*10)/10;
+  st.activeTrip.pauseMs   = st.totalPauseMs||0;
+  st.activeTrip.segelMs   = st.segelMs||0;
+  st.activeTrip.motorMs   = st.motorMs||0;
+  st.activeTrip.anchorEvents = st.anchorEvents||[];
+  // km from segments already set above (sailKm/motorKm)
+  // but also save as segelKm for compatibility
+  st.activeTrip.segelKm   = st.activeTrip.sailKm||0;
+  st.activeTrip.motorKmGps = st.activeTrip.motorKm||0;
+
   st.tracking = false;
   var saved = st.activeTrip;
   st.activeTrip = null;
@@ -1449,7 +1526,7 @@ SCKR.fahrtenbuch.startGeofence = function() {
     var d = SCKR.fahrtenbuch.distHome(pos.coords.latitude, pos.coords.longitude, activeBoat);
     st.geoLastDist = Math.round(d);
 
-    // Water check: need to be actually moving (speed > 0.3 m/s = 0.6 knots)
+    // Water check: need to be actually moving (speed > 0.3 m/s = ~1 km/h)
     var isMoving = (pos.coords.speed || 0) > 0.3;
 
     if(!st.tracking && d > (st.profile.geoStartM||200) && isMoving) {
@@ -1638,6 +1715,25 @@ SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
   var st = SCKR.fahrtenbuch.state;
   var container = document.getElementById(containerId);
   if(!container) return;
+
+  // Zoom-Fix: Karte nur inkrementell updaten wenn bereits initialisiert
+  var isLiveMap = containerId === "live-map";
+  if(isLiveMap && R.mapInst && R.trackLine && pts && pts.length > 1) {
+    try {
+      var coords = pts.map(function(p){return [p.lat,p.lng];});
+      R.trackLine.setLatLngs(coords);
+      var last = pts[pts.length-1];
+      if(R.posMarker) R.posMarker.setLatLng([last.lat, last.lng]);
+      return; // Zoom bleibt erhalten!
+    } catch(e) { /* Fallthrough zu vollstaendigem Rebuild */ }
+  }
+
+  // Zoom vor Rebuild speichern
+  var savedZoom = null, savedCenter = null;
+  if(isLiveMap && R.mapInst) {
+    try { savedZoom = R.mapInst.getZoom(); savedCenter = R.mapInst.getCenter(); } catch(e) {}
+  }
+
   R.destroyMap();
   container.innerHTML = "";
   container.style.height = "220px";
@@ -1688,7 +1784,11 @@ SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
       R.trackLine = L.polyline(coords, {color:"#1AABA0", weight:3, opacity:0.9}).addTo(R.mapInst);
       L.circleMarker(coords[0], {radius:7,color:"#fff",fillColor:"#1A8A50",fillOpacity:1,weight:2}).bindPopup("Start").addTo(R.mapInst);
       L.circleMarker(coords[coords.length-1], {radius:7,color:"#fff",fillColor:"#C8A84B",fillOpacity:1,weight:2}).bindPopup("Ende").addTo(R.mapInst);
+      if(savedZoom !== null && savedCenter !== null) {
+      R.mapInst.setView(savedCenter, savedZoom, {animate:false});
+    } else {
       R.mapInst.fitBounds(coords, {padding:[25,25]});
+    }
     }
 
     // Infrastructure markers
@@ -1757,7 +1857,7 @@ SCKR.fahrtenbuch.render.live = function() {
   // Primary gauges: Speed + Compass
   html += '<div class="inst-primary">'
     + '<div class="gauge">'
-    + '<div class="gauge-val" id="gv-speed">'+SCKR.core.fmt.speed(st.currentSpeed)+'<span class="gauge-unit">kn</span></div>'
+    + '<div class="gauge-val" id="gv-speed">'+SCKR.core.fmt.speed(st.currentSpeed)+'<span class="gauge-unit">km/h</span></div>'
     + '<div class="gauge-lbl">GESCHWINDIGKEIT</div>'
     + '</div>'
     + '<div class="compass-wrap">'+SCKR.fahrtenbuch.render.compassSVG(st.currentHeading)+'</div>'
@@ -1773,599 +1873,78 @@ SCKR.fahrtenbuch.render.live = function() {
     }));
     var distVal = st.activeTrip && st.activeTrip.category==="Binnen" ? st.liveKm.toFixed(2) : (st.liveKm/1.852).toFixed(2);
     var distUnit = st.activeTrip && st.activeTrip.category==="Binnen" ? "km" : "sm";
-    html += '<div class="inst-grid">'
+    html += '<div id="gv-pause-ind" style="display:none;align-items:center;justify-content:center;gap:8px;padding:10px;background:rgba(200,16,46,.12);border-bottom:1px solid var(--bdr2)">'
+      + '<span style="width:10px;height:10px;border-radius:50%;background:var(--acc);animation:pulseDot 1s infinite"></span>'
+      + '<span style="font-family:var(--fd);font-size:14px;font-weight:800;letter-spacing:.08em;color:var(--acc)">PAUSE</span>'
+      + '</div>'
+
+      // Zeile 1: Strecke | Aktive Dauer | Punkte
+      + '<div class="inst-grid">'
       + '<div class="inst-cell"><div class="inst-val" id="gv-dist">'+distVal+'<span class="inst-unit">'+distUnit+'</span></div><div class="inst-label">STRECKE</div></div>'
-      + '<div class="inst-cell"><div class="inst-val" id="gv-time">'+SCKR.core.fmt.time(st.elapsed)+'</div><div class="inst-label">DAUER</div></div>'
+      + '<div class="inst-cell"><div class="inst-val" id="gv-time">'+SCKR.core.fmt.time(st.elapsed)+'</div><div class="inst-label">FAHRZEIT</div></div>'
       + '<div class="inst-cell"><div class="inst-val" id="gv-pts">'+livePt+'<span class="inst-unit">PKT</span></div><div class="inst-label">PUNKTE</div></div>'
       + '</div>'
+
+      // Zeile 2: V-Max | Durchschnitt | Pausen
       + '<div class="inst-grid">'
-      + '<div class="inst-cell"><div class="inst-val" id="gv-max">'+SCKR.core.fmt.speed(st.maxSpeed)+'<span class="inst-unit">kn</span></div><div class="inst-label">V-MAX</div></div>'
-      + '<div class="inst-cell"><div class="inst-val" id="gv-heading">'+Math.round(st.currentHeading)+'&#176;</div><div class="inst-label">KURS '+SCKR.core.fmt.compass(st.currentHeading)+'</div></div>'
-      + '<div class="inst-cell"><div class="inst-val" id="gv-mode">'+(st.propulsionMode==="Motor"?"MOT":"SEG")+'</div><div class="inst-label">ANTRIEB</div></div>'
+      + '<div class="inst-cell"><div class="inst-val" id="gv-max">'+SCKR.core.fmt.speed(st.maxSpeed)+'<span class="inst-unit">km/h</span></div><div class="inst-label">V-MAX</div></div>'
+      + '<div class="inst-cell"><div class="inst-val" id="gv-avg">'+(st.avgSpeed||0).toFixed(1)+'<span class="inst-unit">km/h</span></div><div class="inst-label">Ø-SPEED</div></div>'
+      + '<div class="inst-cell"><div class="inst-val" id="gv-pause">0<span class="inst-unit">min</span></div><div class="inst-label">PAUSEN</div></div>'
       + '</div>'
-      + propSwitch
-      + '<div class="infra-btns"><button class="infra-btn" type="button" onclick="SCKR.fahrtenbuch.tagInfra(\'Bruecke\')">BRUECKE</button><button class="infra-btn" type="button" onclick="SCKR.fahrtenbuch.tagInfra(\'Schleuse\')">SCHLEUSE</button></div>';
-  } else {
-    html += '<div class="idle-msg">Tippe "Fahrt starten". Brücken und Schleusen werden nach der Fahrt via OpenStreetMap erkannt.</div>';
-  }
 
-  html += '</div>'
-    + '<button class="btn '+(st.tracking?"btn-red":"btn-green")+'" type="button" onclick="'+(st.tracking?"SCKR.fahrtenbuch.stopTracking()":"SCKR.fahrtenbuch.openNewTrip()")+'" style="margin-bottom:10px">'+(st.tracking?"FAHRT BEENDEN":"FAHRT STARTEN")+'</button>'
-    + '<button class="btn btn-ghost" type="button" onclick="SCKR.fahrtenbuch.openManual()">+ MANUELL EINTRAGEN</button>';
+      // Zeile 3: Segel | Motor | Anker
+      + '<div class="inst-grid">'
+      + '<div class="inst-cell" style="border-left:3px solid #1E6FBF"><div class="inst-val" id="gv-segel">0.00<span class="inst-unit">km</span></div><div class="inst-label">SEGEL</div></div>'
+      + '<div class="inst-cell" style="border-left:3px solid var(--acc)"><div class="inst-val" id="gv-motor">0.00<span class="inst-unit">km</span></div><div class="inst-label">MOTOR</div></div>'
+      + '<div class="inst-cell"><div class="inst-val" id="gv-anker">0<span class="inst-unit">x</span></div><div class="inst-label">ANKER</div></div>'
+      + '</div>'
 
-  document.getElementById("live").innerHTML = html;
+      // Zeile 4: Manuelle Aktionen
+      + '<div class="inst-grid" style="padding:10px 14px;gap:8px;grid-template-columns:1fr 1fr 1fr">'
+      + '<button type="button" onclick="SCKR.fahrtenbuch.togglePause()" id="btn-pause" style="padding:10px 6px;border-radius:6px;border:2px solid var(--bdr);background:var(--bg3);color:var(--wh);font-family:var(--fd);font-size:11px;font-weight:800;letter-spacing:.04em;cursor:pointer">&#9646;&#9646; PAUSE</button>'
+      + '<button type="button" onclick="SCKR.fahrtenbuch.setAnchor()" style="padding:10px 6px;border-radius:6px;border:2px solid var(--bdr);background:var(--bg3);color:var(--wh);font-family:var(--fd);font-size:11px;font-weight:800;letter-spacing:.04em;cursor:pointer">&#9875; ANKER</button>'
+      + '<button type="button" onclick="SCKR.fahrtenbuch.liftAnchor()" style="padding:10px 6px;border-radius:6px;border:2px solid var(--bdr);background:var(--bg3);color:var(--wh);font-family:var(--fd);font-size:11px;font-weight:800;letter-spacing:.04em;cursor:pointer">&#8593; LICHTEN</button>'
+      + '</div>'
 
-  // Always show map
-  setTimeout(function() {
-    SCKR.fahrtenbuch.render.showMap("live-map", st.tracking && st.trackPts.length>1 ? st.trackPts : null, st.infraEvs);
-  }, 100);
-};
-
-SCKR.fahrtenbuch.render.updateLiveGauges = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var setText = function(id, val) { var el=document.getElementById(id); if(el) el.innerHTML=val; };
-  setText("gv-speed", SCKR.core.fmt.speed(st.currentSpeed)+'<span class="gauge-unit">kn</span>');
-  setText("gv-max",   SCKR.core.fmt.speed(st.maxSpeed)+'<span class="inst-unit">kn</span>');
-  setText("gv-heading", Math.round(st.currentHeading)+"&#176;");
-  setText("gv-mode",  st.propulsionMode==="Motor"?"MOT":"SEG");
-  setText("gv-time",  SCKR.core.fmt.time(st.elapsed));
-  if(st.tracking && st.activeTrip) {
-    var distVal = st.activeTrip.category==="Binnen" ? st.liveKm.toFixed(2) : (st.liveKm/1.852).toFixed(2);
-    var distUnit = st.activeTrip.category==="Binnen" ? "km" : "sm";
-    setText("gv-dist", distVal+'<span class="inst-unit">'+distUnit+'</span>');
-    var livePt = Math.round(SCKR.fahrtenbuch.points.trip({
-      sailKm: st.activeTrip.category==="Binnen" ? st.liveKm : 0,
-      sailSm: st.activeTrip.category!=="Binnen" ? st.liveKm/1.852 : 0,
-      bridges: st.activeTrip.bridges||0, locks: st.activeTrip.locks||0
-    }));
-    setText("gv-pts", livePt+'<span class="inst-unit">PKT</span>');
-  }
-  // Update compass
-  var cw = document.querySelector(".compass-wrap");
-  if(cw) cw.innerHTML = SCKR.fahrtenbuch.render.compassSVG(st.currentHeading);
-};
-
-/* -- Trips List -- */
-SCKR.fahrtenbuch.render.trips = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var el = document.getElementById("trips");
-  var esc = SCKR.core.fmt.esc;
-
-  var filtered = st.trips;
-  if(st.filterYear!=="all") filtered = filtered.filter(function(t){ return new Date(t.date).getFullYear()===parseInt(st.filterYear); });
-  if(st.filterMonth!=="all") filtered = filtered.filter(function(t){ return new Date(t.date).getMonth()===parseInt(st.filterMonth); });
-
-  var years = {};
-  for(var i=0;i<st.trips.length;i++) years[new Date(st.trips[i].date).getFullYear()] = true;
-  var yk = Object.keys(years).sort().reverse();
-  var yearOpts = '<option value="all">Alle Jahre</option>' + yk.map(function(y){ return '<option value="'+y+'"'+(st.filterYear===y?' selected':'')+'>'+y+'</option>'; }).join("");
-
-  var monthNames = ["Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-  var monthOpts = '<option value="all">Alle Monate</option>';
-  for(var m=0;m<12;m++) monthOpts += '<option value="'+m+'"'+(st.filterMonth===String(m)?' selected':'')+'>'+monthNames[m]+'</option>';
-
-  if(!st.trips.length) {
-    el.innerHTML = '<div class="shead"><div><div class="lxs">Archiv</div><h2>Meine Fahrten</h2></div><button class="btn-sm" type="button" onclick="SCKR.fahrtenbuch.openManual()">+ MANUELL</button></div>'
-      + '<div class="empty"><div style="font-size:52px;opacity:.15;margin-bottom:12px">&#x26F5;</div>'
-      + '<div style="font-family:var(--fd);font-size:18px;font-weight:700;margin-bottom:6px">NOCH KEINE FAHRTEN</div>'
-      + '<div style="font-size:13px;margin-bottom:18px">Tippe unten um zu starten oder lade Beispieldaten</div></div>';
-    return;
-  }
-
-  var shown = filtered.slice(0,6);
-  var showMore = filtered.length > 6;
-
-  var html = '<div class="shead"><div><div class="lxs">Archiv - '+st.trips.length+' Fahrten</div><h2>Meine Fahrten</h2></div><button class="btn-sm" type="button" onclick="SCKR.fahrtenbuch.openManual()">+ MANUELL</button></div>'
-    + '<div class="filter-bar"><select onchange="SCKR.fahrtenbuch.state.filterYear=this.value;SCKR.fahrtenbuch.render.trips()">'+yearOpts+'</select>'
-    + '<select onchange="SCKR.fahrtenbuch.state.filterMonth=this.value;SCKR.fahrtenbuch.render.trips()">'+monthOpts+'</select></div>';
-
-  for(var k=0;k<shown.length;k++) {
-    var t = shown[k];
-    var pts = Math.round(SCKR.fahrtenbuch.points.trip(t));
-    html += '<button class="trip-card" type="button" onclick="SCKR.fahrtenbuch.openDetail(\''+t.id+'\')">'
-      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
-      + '<span class="tr-date">'+SCKR.core.fmt.date(t.date)+'</span><span class="tr-pts">'+pts+' PKT</span></div>'
-      + '<div class="tr-desc">'+esc(t.description||t.yachtName||"-")+'</div>'
-      + '<div style="display:flex;gap:5px;flex-wrap:wrap">'
-      + '<span class="chip '+(t.category!=="Binnen"?"see":"")+'">'+t.category.toUpperCase()+'</span>'
-      + (t.isTracked?'<span class="chip gps">GPS</span>':'')
-      + (t.bridges>0?'<span class="chip">BR '+t.bridges+'</span>':'')
-      + (t.locks>0?'<span class="chip">SL '+t.locks+'</span>':'')
-      + (t.windDir?'<span class="chip">'+t.windDir+' '+t.windForce+'</span>':'')
-      + '</div></button>';
-  }
-
-  if(showMore) {
-    html += '<button class="btn btn-ghost" type="button" onclick="SCKR.fahrtenbuch.render.trips_all()" style="margin-top:8px">ALLE '+filtered.length+' FAHRTEN ANZEIGEN</button>';
-  }
-  el.innerHTML = html;
-};
-
-SCKR.fahrtenbuch.render.trips_all = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-  var html = '<div class="shead"><div><div class="lxs">Alle Fahrten</div><h2>'+st.trips.length+' Fahrten</h2></div><button class="btn-sm" type="button" onclick="SCKR.fahrtenbuch.render.trips()">ZURUECK</button></div>';
-  for(var i=0;i<st.trips.length;i++) {
-    var t = st.trips[i], pts = Math.round(SCKR.fahrtenbuch.points.trip(t));
-    html += '<button class="trip-card" type="button" onclick="SCKR.fahrtenbuch.openDetail(\''+t.id+'\')">'
-      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
-      + '<span class="tr-date">'+SCKR.core.fmt.date(t.date)+'</span><span class="tr-pts">'+pts+' PKT</span></div>'
-      + '<div class="tr-desc">'+esc(t.description||"-")+'</div></button>';
-  }
-  document.getElementById("trips").innerHTML = html;
-};
-
-/* -- Stats -- */
-SCKR.fahrtenbuch.render.stats = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var range = SCKR.fahrtenbuch.seasonRange(st.seasonYear);
-  var sTrips = st.trips.filter(function(t){ var d=new Date(t.date); return d>=range.start && d<=range.end; });
-  var s = SCKR.fahrtenbuch.points.season(sTrips);
-  var pct = Math.min(100, (s.total/1000)*100);
-  var df = function(d){ return d.toLocaleDateString("de-DE",{day:"2-digit",month:"short",year:"numeric"}); };
-  var yrs = [st.seasonYear-1, st.seasonYear, st.seasonYear+1];
-
-  var html = '<div class="shead"><div><div class="lxs">BSV Fahrtenwettbewerb</div><h2>Saisonpunkte</h2></div></div>'
-    + '<div class="season-pick">'
-    + yrs.map(function(y){ return '<button type="button" onclick="SCKR.fahrtenbuch.state.seasonYear='+y+';SCKR.fahrtenbuch.render.stats()" class="'+(y===st.seasonYear?"active":"")+'">'+(y-1)+'/'+y+'</button>'; }).join("")
-    + '</div>'
-    + '<div class="hero">'
-    + '<div class="lxs" style="margin-bottom:8px">GESAMT - '+(st.seasonYear-1)+'/'+st.seasonYear+'</div>'
-    + '<div class="hero-num">'+Math.round(s.total).toLocaleString("de-DE")+'<span class="hero-unit">PKT</span></div>'
-    + '<div class="prog"><div class="prog-bar" style="width:'+pct+'%"></div></div>'
-    + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.04em;margin-bottom:12px">'
-    + '<span>FAHRTENFLAGGE AB 1.000</span><span style="color:'+(s.total>=1000?"var(--teal)":"var(--mut)")+'">'+(s.total>=1000?"ERREICHT":"NOCH "+Math.round(1000-s.total)+" PKT")+'</span></div>'
-    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
-    + (s.total>=1000?'<span class="badge">FAHRTENFLAGGE</span>':'')
-    + (s.total>=1500?'<span class="badge">60 WP</span>':s.total>=1001?'<span class="badge">40 WP</span>':s.total>=200?'<span class="badge">20 WP</span>':'')
-    + '</div></div>';
-
-  var rows = [["Segel-km",s.s],["Motor x 0.2",s.m],["Bruecken",s.br],["Schleusen",s.lk]];
-  html += '<div class="pnl"><div class="phd"><span class="phd-t">Aufschluesselung</span></div>';
-  for(var j=0;j<rows.length;j++) html += '<div class="prow"><span class="lv">'+rows[j][0]+'</span><span class="rv">'+Math.round(rows[j][1])+'</span></div>';
-  if(s.blOver) html += '<div class="warn">Bruecken+Schleusen auf 200 gedeckelt (waren '+Math.round(s.br+s.lk)+')</div>';
-  var rows2 = [["Fernfahrt",s.fe],["Trailer",s.tr],["Gemeinschaft",s.co],["Regatta-Funktion",s.rf]];
-  for(var k=0;k<rows2.length;k++) html += '<div class="prow"><span class="lv">'+rows2[k][0]+'</span><span class="rv">'+Math.round(rows2[k][1])+'</span></div>';
-  if(s.crOver) html += '<div class="warn">Gemeinschaft+Funktion auf 300 gedeckelt</div>';
-  html += '</div>';
-
-  html += '<div class="pnl"><div class="phd"><span class="phd-t">Bordtage</span></div>'
-    + '<div class="prow"><span class="lv">Bordtage gesamt (max. 50)</span><span class="rv">'+s.bd+'</span></div>'
-    + '<div class="prow"><span class="lv">davon Kueste (max. 20)</span><span class="rv">'+s.ku+'</span></div>'
-    + '<div class="prow"><span class="lv">Zeitraum</span><span class="rv" style="font-size:12px">'+df(range.start)+' - '+df(range.end)+'</span></div></div>';
-
-  html += '<div class="pnl"><div class="phd"><span class="phd-t">Export &amp; Regelwerk</span></div>'
-    + '<div style="padding:14px;display:flex;flex-direction:column;gap:10px">'
-    + '<button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.exportExcel()">EXCEL-EXPORT (BSV VORLAGE)</button>'
-    + '<a href="'+SCKR.config.regelwerkURL+'" target="_blank" class="btn btn-ghost" style="text-decoration:none;text-align:center">BSV REGELWERK 2026 (PDF)</a>'
-    + '</div></div>';
-
-  document.getElementById("stats").innerHTML = html;
-};
-
-/* -- Settings -- */
-SCKR.fahrtenbuch.render.settings = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-
-  var boatsHTML = "";
-  for(var i=0;i<st.boats.length;i++) {
-    var b = st.boats[i];
-    var hp = SCKR.fahrtenbuch.boatHomePort(b);
-    boatsHTML += '<div class="prow"><div><div style="font-weight:600">'+esc(b.name)+'</div>'
-      + '<div style="font-size:12px;color:var(--mut)">'+b.category+' - '+esc(b.boatClass||"-")+' - '+esc(b.sailNumber||"-")+'</div>'
-      + '<div style="font-size:11px;color:var(--acc3);margin-top:2px">Heimathafen: '+esc(hp.name)+'</div></div>'
-      + '<button type="button" onclick="SCKR.fahrtenbuch.editBoat(\''+b.id+'\')" style="padding:5px 10px;border-radius:6px;border:1px solid var(--bdr);background:transparent;color:var(--acc);font-size:12px;cursor:pointer;font-family:var(--fd);font-weight:700">EDIT</button></div>';
-  }
-  if(!st.boats.length) boatsHTML = '<div class="prow"><span class="lv" style="color:var(--mut)">Noch keine Boote angelegt</span></div>';
-
-  var html = '<div class="shead"><div><div class="lxs">'+esc(SCKR.admin.state.branding.clubName)+'</div><h2>Einstellungen</h2></div></div>'
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Segler-Profil</span></div>'
-    + '<div class="fld"><label class="lbl">Name (BSV-Abgabe)</label><input class="inp" id="pf-name" value="'+esc(st.profile.name)+'" onchange="SCKR.fahrtenbuch.savePf()" placeholder="Vor- und Nachname"></div>'
-    + '<div class="fld"><label class="lbl">Alter</label><input class="inp" type="number" id="pf-age" value="'+(st.profile.age||"")+'" onchange="SCKR.fahrtenbuch.savePf()"></div></div>'
-
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Meine Boote</span></div>'+boatsHTML
-    + '<div class="fld"><button type="button" onclick="SCKR.fahrtenbuch.addBoatSheet()" class="btn btn-ghost" style="padding:10px;font-size:13px">+ NEUES BOOT ANLEGEN</button></div></div>'
-
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Geofencing</span></div>'
-    + '<div class="trow"><div><div style="font-size:14px;font-weight:600">Automatisch tracken</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Startet automatisch beim Verlassen des Heimathafens</div></div>'+SCKR.core.ui.mkSw("pf-auto",st.profile.autoTrack)+'</div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Start ab (m)</label><input class="inp" type="number" id="pf-gst" value="'+(st.profile.geoStartM||200)+'" onchange="SCKR.fahrtenbuch.savePf()"></div>'
-    + '<div class="fld"><label class="lbl">Stop bei (m)</label><input class="inp" type="number" id="pf-gsp" value="'+(st.profile.geoStopM||100)+'" onchange="SCKR.fahrtenbuch.savePf()"></div></div>'
-    + '<div style="padding:10px 14px;font-size:11px;color:var(--mut)">Heimathafen pro Boot in der Boot-Bearbeitung einstellbar.</div></div>'
-
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Cloud-Sync (JSONBin.io)</span></div>'
-    + '<div style="padding:10px 16px;font-size:12px;color:var(--mut);line-height:1.6;border-bottom:1px solid var(--bdr2)">Kostenloses Konto auf jsonbin.io - Master Key kopieren.</div>'
-    + '<div class="fld"><label class="lbl">Master Key</label><input class="inp" type="password" id="pf-ckey" value="'+esc(st.profile.cloudApiKey||"")+'" onchange="SCKR.fahrtenbuch.savePf()" placeholder="$2b$10$..."></div>'
-    + '<div class="fld"><label class="lbl">Bin ID</label><input class="inp" id="pf-cbin" value="'+esc(st.profile.cloudBinId||"")+'" onchange="SCKR.fahrtenbuch.savePf()" style="font-size:13px"></div>'
-    + '<div class="trow"><div><div style="font-size:14px;font-weight:600">Auto-Sync</div></div>'+SCKR.core.ui.mkSw("pf-autosync",st.profile.autoSync)+'</div>'
-    + '<div style="padding:10px 14px;display:flex;gap:8px">'
-    + '<button type="button" onclick="SCKR.fahrtenbuch.cloud.sync(false)" class="btn btn-gold" style="flex:1;font-size:13px;padding:10px">JETZT SPEICHERN</button>'
-    + '<button type="button" onclick="SCKR.fahrtenbuch.cloud.load()" class="btn btn-ghost" style="flex:1;font-size:13px;padding:10px">LADEN</button></div></div>'
-
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Datensicherung</span></div>'
-    + '<div style="padding:14px;display:flex;flex-direction:column;gap:10px">'
-    + '<button type="button" onclick="SCKR.fahrtenbuch.saveToFiles()" class="btn btn-gold">IN DATEIEN/ICLOUD SPEICHERN</button>'
-    + '<button type="button" onclick="SCKR.fahrtenbuch.exportJSON()" class="btn btn-ghost">JSON-BACKUP HERUNTERLADEN</button>'
-    + '<button type="button" onclick="document.getElementById(\'json-import\').click()" class="btn btn-ghost">BACKUP WIEDERHERSTELLEN</button></div></div>'
-
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Info</span></div>'
-    + '<div class="prow"><span class="lv">Fahrten</span><span class="rv">'+st.trips.length+'</span></div>'
-    + '<div class="prow"><span class="lv">Boote</span><span class="rv">'+st.boats.length+'</span></div>'
-    + '<div class="prow"><span class="lv">Version</span><span class="rv" style="font-size:12px">'+SCKR.config.version+'</span></div>'
-    + '<div class="prow"><span class="lv">Admin</span><span class="rv" style="font-size:12px">Tippe BSV-Badge oben</span></div></div>';
-
-  document.getElementById("settings").innerHTML = html;
-
-  var autoEl = document.getElementById("pf-auto");
-  if(autoEl) autoEl.addEventListener("click", function() {
-    st.profile.autoTrack = this.classList.contains("on");
-    SCKR.core.storage.set("profile", st.profile);
-    if(st.profile.autoTrack) SCKR.fahrtenbuch.startGeofence(); else SCKR.fahrtenbuch.stopGeofence();
-    SCKR.core.ui.toast(st.profile.autoTrack?"GEOFENCING AKTIV":"DEAKTIVIERT");
-  });
-  var syncEl = document.getElementById("pf-autosync");
-  if(syncEl) syncEl.addEventListener("click", function() {
-    st.profile.autoSync = this.classList.contains("on");
-    SCKR.core.storage.set("profile", st.profile);
-    SCKR.fahrtenbuch.cloud.startAuto();
-    SCKR.core.ui.toast(st.profile.autoSync?"AUTO-SYNC AKTIV":"DEAKTIVIERT");
-  });
-};
-
-SCKR.fahrtenbuch.savePf = async function() {
-  var st = SCKR.fahrtenbuch.state;
-  var g = function(id){ return document.getElementById(id); };
-  st.profile.name = (g("pf-name")||{}).value||st.profile.name;
-  st.profile.age = +(g("pf-age")||{}).value||0;
-  st.profile.geoStartM = +(g("pf-gst")||{}).value||200;
-  st.profile.geoStopM = +(g("pf-gsp")||{}).value||100;
-  st.profile.cloudApiKey = (g("pf-ckey")||{}).value||st.profile.cloudApiKey;
-  st.profile.cloudBinId = (g("pf-cbin")||{}).value||st.profile.cloudBinId;
-  await SCKR.core.storage.set("profile", st.profile);
-  SCKR.fahrtenbuch.cloud.startAuto();
-  SCKR.core.ui.toast("GESPEICHERT");
-};
-
-/* ═══════════════════════════════════════════════════
-   FAHRTENBUCH SHEETS (Modals)
-   ═══════════════════════════════════════════════════ */
-
-/* -- Boat Management -- */
-SCKR.fahrtenbuch.addBoatSheet = function() {
-  var esc = SCKR.core.fmt.esc;
-  SCKR.core.ui.openSheet(
-    '<div class="sheet-hd"><h3>NEUES BOOT</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
-    + '<div class="pnl">'
-    + '<div class="fld"><label class="lbl">Name des Bootes</label><input class="inp" id="nb-name" placeholder="z. B. Moewe"></div>'
-    + '<div class="fld"><label class="lbl">Revier</label><select class="inp" id="nb-cat"><option>Binnen</option><option>See/Kueste</option></select></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Klasse</label><input class="inp" id="nb-cls" placeholder="H-Jolle"></div>'
-    + '<div class="fld"><label class="lbl">Segel-Nr.</label><input class="inp" id="nb-sn"></div></div>'
-    + '<div class="fld"><label class="lbl">Heimathafen / Liegeplatz</label><input class="inp" id="nb-pname" placeholder="z. B. SCKR Kruepelsee"></div>'
-    + '<div class="g2">'
-    + '<div class="fld"><label class="lbl">Breitengrad</label><input class="inp" type="number" step="0.0001" id="nb-plat" placeholder="52.3218"></div>'
-    + '<div class="fld"><label class="lbl">Laengengrad</label><input class="inp" type="number" step="0.0001" id="nb-plon" placeholder="13.6538"></div>'
-    + '</div>'
-    + '<div class="fld"><button type="button" onclick="SCKR.fahrtenbuch.setBoatHomeToPos()" class="btn btn-ghost" style="padding:9px;font-size:12px">AKTUELLEN STANDORT SETZEN</button></div>'
-    + '</div>'
-    + '<button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.saveNewBoat()" style="margin-top:14px">BOOT SPEICHERN</button>'
-  );
-};
-
-SCKR.fahrtenbuch.saveNewBoat = async function() {
-  var st = SCKR.fahrtenbuch.state;
-  var name = (document.getElementById("nb-name")||{}).value||"Boot";
-  var b = SCKR.fahrtenbuch.newBoat({
-    name: name,
-    category: (document.getElementById("nb-cat")||{}).value,
-    boatClass: (document.getElementById("nb-cls")||{}).value,
-    sailNumber: (document.getElementById("nb-sn")||{}).value,
-    homePortName: (document.getElementById("nb-pname")||{}).value||"",
-    homePortLat: +(document.getElementById("nb-plat")||{}).value||0,
-    homePortLon: +(document.getElementById("nb-plon")||{}).value||0
-  });
-  st.boats.push(b);
-  await SCKR.core.storage.set("boats", st.boats);
-  SCKR.core.ui.closeSheet();
-  SCKR.fahrtenbuch.render.settings();
-  SCKR.core.ui.toast("BOOT ANGELEGT");
-};
-
-SCKR.fahrtenbuch.setBoatHomeToPos = function() {
-  if(!navigator.geolocation) { SCKR.core.ui.toast("GPS NICHT VERFUEGBAR"); return; }
-  navigator.geolocation.getCurrentPosition(function(pos) {
-    var latEl = document.getElementById("nb-plat") || document.getElementById("eb-plat");
-    var lonEl = document.getElementById("nb-plon") || document.getElementById("eb-plon");
-    if(latEl) latEl.value = pos.coords.latitude.toFixed(5);
-    if(lonEl) lonEl.value = pos.coords.longitude.toFixed(5);
-    SCKR.core.ui.toast("STANDORT GESETZT");
-  }, function(){ SCKR.core.ui.toast("GPS NICHT VERFUEGBAR"); }, {enableHighAccuracy:true, timeout:10000});
-};
-
-SCKR.fahrtenbuch.editBoat = function(id) {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-  var b = null;
-  for(var i=0;i<st.boats.length;i++) if(st.boats[i].id===id) { b = st.boats[i]; break; }
-  if(!b) return;
-  SCKR.core.ui.openSheet(
-    '<div class="sheet-hd"><h3>BOOT BEARBEITEN</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
-    + '<div class="pnl">'
-    + '<div class="fld"><label class="lbl">Name</label><input class="inp" id="eb-name" value="'+esc(b.name)+'"></div>'
-    + '<div class="fld"><label class="lbl">Revier</label><select class="inp" id="eb-cat"><option'+(b.category==="Binnen"?" selected":"")+'>Binnen</option><option'+(b.category!=="Binnen"?" selected":"")+'>See/Kueste</option></select></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Klasse</label><input class="inp" id="eb-cls" value="'+esc(b.boatClass||"")+'"></div>'
-    + '<div class="fld"><label class="lbl">Segel-Nr.</label><input class="inp" id="eb-sn" value="'+esc(b.sailNumber||"")+'"></div></div>'
-    + '<div class="fld"><label class="lbl">Heimathafen</label><input class="inp" id="eb-pname" value="'+esc(b.homePortName||"")+'"></div>'
-    + '<div class="g2">'
-    + '<div class="fld"><label class="lbl">Breitengrad</label><input class="inp" type="number" step="0.0001" id="eb-plat" value="'+(b.homePortLat||"")+'"></div>'
-    + '<div class="fld"><label class="lbl">Laengengrad</label><input class="inp" type="number" step="0.0001" id="eb-plon" value="'+(b.homePortLon||"")+'"></div>'
-    + '</div>'
-    + '<div class="fld"><button type="button" onclick="SCKR.fahrtenbuch.setBoatHomeToPos()" class="btn btn-ghost" style="padding:9px;font-size:12px">AKTUELLEN STANDORT SETZEN</button></div>'
-    + '</div>'
-    + '<div style="display:flex;gap:8px;margin-top:14px">'
-    + '<button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.saveEditBoat(\''+id+'\')" style="flex:1">SPEICHERN</button>'
-    + '<button class="btn btn-red" type="button" onclick="SCKR.fahrtenbuch.deleteBoat(\''+id+'\')" style="padding:14px 16px">LOESCHEN</button></div>'
-  );
-};
-
-SCKR.fahrtenbuch.saveEditBoat = async function(id) {
-  var st = SCKR.fahrtenbuch.state;
-  var b = null;
-  for(var i=0;i<st.boats.length;i++) if(st.boats[i].id===id) { b = st.boats[i]; break; }
-  if(!b) return;
-  b.name = (document.getElementById("eb-name")||{}).value||b.name;
-  b.category = (document.getElementById("eb-cat")||{}).value;
-  b.boatClass = (document.getElementById("eb-cls")||{}).value;
-  b.sailNumber = (document.getElementById("eb-sn")||{}).value;
-  b.homePortName = (document.getElementById("eb-pname")||{}).value||"";
-  b.homePortLat = +(document.getElementById("eb-plat")||{}).value||0;
-  b.homePortLon = +(document.getElementById("eb-plon")||{}).value||0;
-  await SCKR.core.storage.set("boats", st.boats);
-  SCKR.core.ui.closeSheet();
-  SCKR.fahrtenbuch.render.settings();
-  SCKR.core.ui.toast("BOOT AKTUALISIERT");
-};
-
-SCKR.fahrtenbuch.deleteBoat = async function(id) {
-  if(!confirm("Boot loeschen?")) return;
-  var st = SCKR.fahrtenbuch.state;
-  st.boats = st.boats.filter(function(x){ return x.id !== id; });
-  await SCKR.core.storage.set("boats", st.boats);
-  SCKR.core.ui.closeSheet();
-  SCKR.fahrtenbuch.render.settings();
-  SCKR.core.ui.toast("GELOESCHT");
-};
-
-SCKR.fahrtenbuch.selectBoatChip = function(el, id) {
-  var chips = document.querySelectorAll(".boat-chip");
-  for(var i=0;i<chips.length;i++) chips[i].classList.remove("sel");
-  el.classList.add("sel");
-  SCKR.fahrtenbuch.state.selectedBoatId = id;
-  var st = SCKR.fahrtenbuch.state;
-  var b = null;
-  for(var j=0;j<st.boats.length;j++) if(st.boats[j].id===id) { b = st.boats[j]; break; }
-  if(!b) return;
-  // Update read-only displays
-  var upd = function(id, v) { var e=document.getElementById(id); if(e) e.textContent=v; };
-  upd("nt-cls-disp", b.boatClass||"-");
-  upd("nt-sn-disp", b.sailNumber||"-");
-  upd("nt-yn-disp", b.name);
-  var cat = document.getElementById("nt-cat");
-  if(cat) cat.value = b.category;
-};
-
-/* -- New Trip Sheet -- */
-SCKR.fahrtenbuch.openNewTrip = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-  if(st.boats.length === 0) {
-    SCKR.core.ui.toast("BITTE ZUERST EIN BOOT ANLEGEN");
-    SCKR.core.goto("settings");
-    return;
-  }
-  var b = SCKR.fahrtenbuch.getActiveBoat() || st.boats[0];
-  st.selectedBoatId = b.id;
-
-  var boatChips = "";
-  for(var i=0;i<st.boats.length;i++) {
-    boatChips += '<div class="boat-chip'+(st.boats[i].id===b.id?" sel":"")+'" onclick="SCKR.fahrtenbuch.selectBoatChip(this,\''+st.boats[i].id+'\')">'+esc(st.boats[i].name)+'</div>';
-  }
-
-  var routes = SCKR.fahrtenbuch.getRouteSuggestions();
-  var routeChips = "";
-  for(var j=0;j<routes.length;j++) {
-    routeChips += '<button type="button" style="padding:5px 10px;border-radius:100px;border:1px solid var(--bdr);background:rgba(200,168,75,.08);color:var(--off);font-size:11px;cursor:pointer;font-family:var(--fd);font-weight:600;white-space:nowrap" onclick="document.getElementById(\'nt-desc\').value=this.textContent">'+esc(routes[j])+'</button>';
-  }
-
-  var wxHtml = st.currentWeather ? SCKR.fahrtenbuch.weather.stripHTML(st.currentWeather) : '<div style="padding:10px 16px;font-size:12px;color:var(--mut)">Wetter laedt...</div>';
-
-  SCKR.core.ui.openSheet(
-    '<div class="sheet-hd"><h3>NEUE FAHRT</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
-    + '<div class="pnl"><div class="boat-chips"><div class="lxs" style="width:100%;margin-bottom:4px">BOOT WAEHLEN</div>'+boatChips+'</div>'
-    + '<div class="ro"><span class="lbl">Klasse</span><span class="ro-val" id="nt-cls-disp">'+esc(b.boatClass||"-")+'</span></div>'
-    + '<div class="ro"><span class="lbl">Segel-Nr.</span><span class="ro-val" id="nt-sn-disp">'+esc(b.sailNumber||"-")+'</span></div>'
-    + '<div class="ro"><span class="lbl">Yacht</span><span class="ro-val" id="nt-yn-disp">'+esc(b.name)+'</span></div>'
-    + '<div class="fld"><label class="lbl">Revier</label><select class="inp" id="nt-cat"><option'+(b.category==="Binnen"?" selected":"")+'>Binnen</option><option'+(b.category!=="Binnen"?" selected":"")+'>See/Kueste</option></select></div>'
-    + '<div class="fld"><label class="lbl">Fahrtstrecke</label><textarea class="inp" id="nt-desc" placeholder="Strecke waehlen oder selbst eintragen"></textarea></div>'
-    + '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 16px 12px;overflow-x:auto">'+routeChips+'</div>'
-    + '</div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Aktuelles Wetter</span></div>'+wxHtml+'</div>'
-    + '<div class="pnl" style="margin-top:10px">'
-    + '<div class="trow"><span style="font-size:14px;flex:1;margin-right:12px">Gemeinschaftsfahrt - 20 Pkt</span>'+SCKR.core.ui.mkSw("nt-comm",false)+'</div>'
-    + '<div class="trow"><span style="font-size:14px;flex:1;margin-right:12px">Funktion bei Regatta - 25 Pkt</span>'+SCKR.core.ui.mkSw("nt-regfn",false)+'</div></div>'
-    + '<button class="btn btn-green" type="button" onclick="SCKR.fahrtenbuch.confirmStart()" style="margin-top:14px">FAHRT STARTEN</button>'
-  );
-};
-
-SCKR.fahrtenbuch.confirmStart = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var b = SCKR.fahrtenbuch.getActiveBoat();
-  if(!b) { SCKR.core.ui.toast("KEIN BOOT GEWAEHLT"); return; }
-  var wx = st.currentWeather || {};
-  SCKR.fahrtenbuch.startTracking({
-    category: (document.getElementById("nt-cat")||{}).value||b.category,
-    boatId: b.id,
-    boatClass: b.boatClass,
-    sailNumber: b.sailNumber,
-    yachtName: b.name,
-    description: (document.getElementById("nt-desc")||{}).value||"",
-    isCommunity: SCKR.core.ui.swVal("nt-comm"),
-    hasRegattaFn: SCKR.core.ui.swVal("nt-regfn"),
-    windDir: wx.windDir||"",
-    windForce: wx.windForce||"",
-    cloudiness: wx.cloudiness||""
-  });
-};
-
-/* -- Manual Trip -- */
-SCKR.fahrtenbuch.openManual = function() {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-  if(st.boats.length === 0) { SCKR.core.ui.toast("BITTE ZUERST EIN BOOT ANLEGEN"); SCKR.core.goto("settings"); return; }
-  var b = SCKR.fahrtenbuch.getActiveBoat() || st.boats[0];
-  st.selectedBoatId = b.id;
-  var today = new Date().toISOString().slice(0,10);
-
-  var boatChips = "";
-  for(var i=0;i<st.boats.length;i++) {
-    boatChips += '<div class="boat-chip'+(st.boats[i].id===b.id?" sel":"")+'" onclick="SCKR.fahrtenbuch.selectBoatChip(this,\''+st.boats[i].id+'\')">'+esc(st.boats[i].name)+'</div>';
-  }
-
-  var routes = SCKR.fahrtenbuch.getRouteSuggestions();
-  var routeChips = "";
-  for(var j=0;j<routes.length;j++) {
-    routeChips += '<button type="button" style="padding:5px 10px;border-radius:100px;border:1px solid var(--bdr);background:rgba(200,168,75,.08);color:var(--off);font-size:11px;cursor:pointer;font-family:var(--fd);font-weight:600;white-space:nowrap" onclick="document.getElementById(\'mt-desc\').value=this.textContent">'+esc(routes[j])+'</button>';
-  }
-
-  SCKR.core.ui.openSheet(
-    '<div class="sheet-hd"><h3>MANUELL EINTRAGEN</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
-    + '<div class="pnl"><div class="boat-chips"><div class="lxs" style="width:100%;margin-bottom:4px">BOOT WAEHLEN</div>'+boatChips+'</div>'
-    + '<div class="ro"><span class="lbl">Boot</span><span class="ro-val">'+esc(b.name)+' - '+esc(b.boatClass||"-")+'</span></div>'
-    + '<div class="fld"><label class="lbl">Datum</label><input class="inp" type="date" id="mt-date" value="'+today+'"></div>'
-    + '<div class="fld"><label class="lbl">Revier</label><select class="inp" id="mt-cat"><option'+(b.category==="Binnen"?" selected":"")+'>Binnen</option><option'+(b.category!=="Binnen"?" selected":"")+'>See/Kueste</option></select></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Segel km</label><input class="inp" type="number" step="0.1" id="mt-sk" value="0"></div>'
-    + '<div class="fld"><label class="lbl">Segel sm</label><input class="inp" type="number" step="0.1" id="mt-ss" value="0"></div>'
-    + '<div class="fld"><label class="lbl">Motor km</label><input class="inp" type="number" step="0.1" id="mt-mk" value="0"></div>'
-    + '<div class="fld"><label class="lbl">Motor sm</label><input class="inp" type="number" step="0.1" id="mt-ms" value="0"></div></div>'
-    + '<div class="fld" style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:14px">Bruecken</span>'+SCKR.core.ui.mkStp("mt-br",0)+'</div>'
-    + '<div class="fld" style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:14px">Schleusen</span>'+SCKR.core.ui.mkStp("mt-lk",0)+'</div>'
-    + '<div class="fld"><label class="lbl">Fernfahrt km</label><input class="inp" type="number" id="mt-fk" value="0"></div>'
-    + '<div class="fld"><label class="lbl">Fahrtstrecke</label><textarea class="inp" id="mt-desc"></textarea></div>'
-    + '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 16px 12px;overflow-x:auto">'+routeChips+'</div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Wetter</span></div>'
-    + SCKR.fahrtenbuch.weather.fieldsHTML(null)
-    + '<div class="fld"><button type="button" onclick="SCKR.fahrtenbuch.autoWeather()" class="btn btn-ghost" style="padding:10px;font-size:13px">WETTER AUTOMATISCH LADEN</button></div></div>'
-    + '<div class="pnl" style="margin-top:10px">'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Trailertransport - 50 Pkt</span>'+SCKR.core.ui.mkSw("mt-tr",false)+'</div>'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Gemeinschaftsfahrt - 20 Pkt</span>'+SCKR.core.ui.mkSw("mt-cm",false)+'</div>'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Regatta-Funktion - 25 Pkt</span>'+SCKR.core.ui.mkSw("mt-rf",false)+'</div></div>'
-    + '<button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.saveManual()" style="margin-top:14px">SPEICHERN</button>'
-  );
-};
-
-SCKR.fahrtenbuch.saveManual = async function() {
-  var w = SCKR.fahrtenbuch.weather.readFromFields();
-  var b = SCKR.fahrtenbuch.getActiveBoat() || {};
-  var t = SCKR.fahrtenbuch.newTrip({
-    date: (document.getElementById("mt-date")||{}).value,
-    category: (document.getElementById("mt-cat")||{}).value,
-    sailKm: +(document.getElementById("mt-sk")||{}).value||0,
-    sailSm: +(document.getElementById("mt-ss")||{}).value||0,
-    motorKm: +(document.getElementById("mt-mk")||{}).value||0,
-    motorSm: +(document.getElementById("mt-ms")||{}).value||0,
-    bridges: SCKR.core.ui.stpVal("mt-br"),
-    locks: SCKR.core.ui.stpVal("mt-lk"),
-    fernKm: +(document.getElementById("mt-fk")||{}).value||0,
-    description: (document.getElementById("mt-desc")||{}).value||"",
-    isTrailered: SCKR.core.ui.swVal("mt-tr"),
-    isCommunity: SCKR.core.ui.swVal("mt-cm"),
-    hasRegattaFn: SCKR.core.ui.swVal("mt-rf"),
-    boatId: b.id||"",
-    boatClass: b.boatClass||"",
-    sailNumber: b.sailNumber||"",
-    yachtName: b.name||"",
-    windDir: w.windDir,
-    windForce: w.windForce,
-    cloudiness: w.cloudiness
-  });
-  if(!w.windDir) {
-    SCKR.fahrtenbuch.fetchTripWeather(t, function(u){ if(u) SCKR.fahrtenbuch.saveTrip(u); });
-  }
-  await SCKR.fahrtenbuch.saveTrip(t);
-  SCKR.core.ui.closeSheet();
-  SCKR.core.ui.toast("FAHRT GESPEICHERT");
-  SCKR.core.goto("trips");
-};
-
-/* -- Detail Sheet -- */
-SCKR.fahrtenbuch._detId = null;
-
-SCKR.fahrtenbuch.openDetail = function(id) {
-  var st = SCKR.fahrtenbuch.state;
-  var esc = SCKR.core.fmt.esc;
-  SCKR.fahrtenbuch._detId = id;
-  var t = null;
-  for(var i=0;i<st.trips.length;i++) if(st.trips[i].id===id) { t = st.trips[i]; break; }
-  if(!t) return;
-
-  // Auto-fetch weather if missing
-  if(!t.windDir && t.date) {
-    SCKR.fahrtenbuch.fetchTripWeather(t, function(updated) {
-      if(updated) {
-        SCKR.fahrtenbuch.saveTrip(updated);
-        if(SCKR.fahrtenbuch._detId === id) SCKR.fahrtenbuch.openDetail(id);
-      }
-    });
-  }
-
-  var infraList = "";
-  if(t.infraEvents && t.infraEvents.length>0) {
-    for(var j=0;j<t.infraEvents.length;j++) {
-      var e = t.infraEvents[j];
-      infraList += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--bdr2)">'
-        + '<span>'+(e.type==="Bruecke"?"BR":"SL")+' '+esc(e.name||e.type)+(e.auto?" (OSM)":" (manuell)")+'</span>'
-        + '<button type="button" onclick="SCKR.fahrtenbuch.removeInfra(\''+t.id+'\',\''+e.id+'\')" style="margin-left:auto;padding:3px 8px;border-radius:4px;border:none;background:rgba(192,57,43,.2);color:#e74c3c;cursor:pointer;font-size:11px">X</button></div>';
-    }
-  }
-
-  var stTime = t.startTime ? new Date(t.startTime).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit",hour12:false}) : "";
-  var etTime = t.endTime ? new Date(t.endTime).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit",hour12:false}) : "";
-
-  var html = '<div class="sheet-hd"><h3>'+SCKR.core.fmt.date(t.date)+'</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
-    + '<div class="pnl"><div class="phd"><span class="phd-t">Fahrt</span></div>'
-    + '<div class="fld"><label class="lbl">Datum</label><input class="inp" type="date" id="dt-date" value="'+t.date+'"></div>'
-    + '<div class="fld"><label class="lbl">Fahrtstrecke</label><textarea class="inp" id="dt-desc">'+esc(t.description)+'</textarea></div>'
-    + '<div class="fld"><label class="lbl">Revier</label><select class="inp" id="dt-cat"><option'+(t.category==="Binnen"?" selected":"")+'>Binnen</option><option'+(t.category!=="Binnen"?" selected":"")+'>See/Kueste</option></select></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Klasse</label><input class="inp" id="dt-cls" value="'+esc(t.boatClass||"")+'"></div>'
-    + '<div class="fld"><label class="lbl">Segel-Nr.</label><input class="inp" id="dt-sn" value="'+esc(t.sailNumber||"")+'"></div></div>'
-    + '<div class="fld"><label class="lbl">Yachtname</label><input class="inp" id="dt-yn" value="'+esc(t.yachtName||"")+'"></div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Strecken (anpassbar)</span></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Segel km</label><input class="inp" type="number" step="0.1" id="dt-sk" value="'+(t.sailKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
-    + '<div class="fld"><label class="lbl">Segel sm</label><input class="inp" type="number" step="0.1" id="dt-ss" value="'+(t.sailSm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
-    + '<div class="fld"><label class="lbl">Motor km</label><input class="inp" type="number" step="0.1" id="dt-mk" value="'+(t.motorKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
-    + '<div class="fld"><label class="lbl">Motor sm</label><input class="inp" type="number" step="0.1" id="dt-ms" value="'+(t.motorSm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div></div>'
-    + '<div class="fld"><label class="lbl">Fernfahrt km</label><input class="inp" type="number" id="dt-fk" value="'+(t.fernKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Zeiten</span></div>'
-    + '<div class="g2"><div class="fld"><label class="lbl">Abgelegt</label><input class="inp" type="time" id="dt-st" value="'+stTime+'"></div>'
-    + '<div class="fld"><label class="lbl">Festgemacht</label><input class="inp" type="time" id="dt-et" value="'+etTime+'"></div></div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Infrastruktur</span></div>'
-    + '<div class="fld" style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:14px">Bruecken</span>'+SCKR.core.ui.mkStp("dt-br",t.bridges||0)+'</div>'
-    + '<div class="fld" style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:14px">Schleusen</span>'+SCKR.core.ui.mkStp("dt-lk",t.locks||0)+'</div>'
-    + (infraList?'<div style="padding:10px 16px;font-size:12px;color:var(--mut)">'+infraList+'</div>':'')+'</div>'
-    + '<div class="pnl" style="margin-top:10px">'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Trailertransport - 50 Pkt</span>'+SCKR.core.ui.mkSw("dt-tr",t.isTrailered)+'</div>'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Gemeinschaftsfahrt - 20 Pkt</span>'+SCKR.core.ui.mkSw("dt-cm",t.isCommunity)+'</div>'
-    + '<div class="trow"><span style="font-size:13px;flex:1;margin-right:12px">Regatta-Funktion - 25 Pkt</span>'+SCKR.core.ui.mkSw("dt-rf",t.hasRegattaFn)+'</div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Wetter</span></div>'
-    + SCKR.fahrtenbuch.weather.fieldsHTML(t)
-    + '<div class="fld"><button type="button" onclick="SCKR.fahrtenbuch.autoWeather()" class="btn btn-ghost" style="padding:10px;font-size:13px">WETTER AUTOMATISCH LADEN</button></div></div>'
-    + '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Notizen</span></div>'
-    + '<div class="fld"><textarea class="inp" id="dt-notes" placeholder="Persoenliche Notizen...">'+esc(t.notes||"")+'</textarea></div></div>';
-
-  if(t.trackPoints && t.trackPoints.length > 1) {
+    
     html += '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">GPS-Track ('+t.trackPoints.length+' Punkte)</span></div>'
       + '<div id="detail-map" style="height:240px;width:100%;border-radius:8px;overflow:hidden;border:1px solid var(--bdr2);background:#0a1e38"></div>'
       + '<div style="padding:10px 14px"><button type="button" onclick="SCKR.fahrtenbuch.rerunOSM(\''+t.id+'\')" class="btn btn-ghost" style="font-size:13px;padding:10px">OSM BRUECKEN/SCHLEUSEN ERKENNEN</button></div></div>';
   }
+
+  // ── FAHRT-STATISTIKEN ────────────────────────────────────
+  var segelKm = (t.segelKm||0).toFixed(2);
+  var motorKm = (t.motorKm||0).toFixed(2);
+  var avgSpd  = (t.avgSpeed||0).toFixed(1);
+  var maxSpd  = SCKR.core.fmt.speed(t.maxSpeed||0);
+  var pauseMin = Math.round((t.pauseMs||0)/60000);
+  var segelMin = Math.round((t.segelMs||0)/60000);
+  var motorMin = Math.round((t.motorMs||0)/60000);
+  var anchors  = t.anchorEvents||[];
+
+  html += '<div class="pnl" style="margin-top:10px"><div class="phd"><span class="phd-t">Fahrt-Statistiken</span></div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--bdr2)">';
+  html += '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--acc)">'+maxSpd+'<span style="font-size:11px;color:var(--mut);margin-left:2px">km/h</span></div><div style="font-family:var(--fd);font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--mut);margin-top:3px">V-MAX</div></div>';
+  html += '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--wh)">'+avgSpd+'<span style="font-size:11px;color:var(--mut);margin-left:2px">km/h</span></div><div style="font-family:var(--fd);font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--mut);margin-top:3px">DURCHSCHNITT</div></div>';
+  html += '<div style="padding:14px 8px;text-align:center"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--wh)">'+pauseMin+'<span style="font-size:11px;color:var(--mut);margin-left:2px">min</span></div><div style="font-family:var(--fd);font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--mut);margin-top:3px">PAUSEN</div></div>';
+  html += '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--bdr2)">';
+  html += '<div style="padding:12px 14px;border-right:1px solid var(--bdr2);display:flex;align-items:center;gap:10px"><div style="width:4px;height:32px;border-radius:2px;background:#1E6FBF;flex-shrink:0"></div><div><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+segelKm+' <span style="font-size:12px;color:var(--mut)">km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em">SEGEL &mdash; '+segelMin+' min</div></div></div>';
+  html += '<div style="padding:12px 14px;display:flex;align-items:center;gap:10px"><div style="width:4px;height:32px;border-radius:2px;background:var(--acc);flex-shrink:0"></div><div><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+motorKm+' <span style="font-size:12px;color:var(--mut)">km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em">MOTOR &mdash; '+motorMin+' min</div></div></div>';
+  html += '</div>';
+
+  if(anchors.length > 0) {
+    html += '<div style="padding:12px 14px"><div style="font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--mut);margin-bottom:8px">ANKER ('+anchors.length+'x)</div>';
+    for(var ai=0;ai<anchors.length;ai++) {
+      var anc=anchors[ai];
+      var ancT=new Date(anc.ts).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+      var ancD=anc.durationMs?Math.round(anc.durationMs/60000)+' min':'aktiv';
+      html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr2);font-size:13px"><span style="color:var(--off)">&#9875; '+ancT+'</span><span style="color:var(--mut)">'+ancD+'</span></div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
 
   html += '<div class="pts-box"><div style="font-family:var(--fd);font-size:52px;font-weight:900;color:var(--acc2);font-variant-numeric:tabular-nums" id="dt-pts-preview">'+Math.round(SCKR.fahrtenbuch.points.trip(t))+' <span style="font-size:20px;font-weight:600;color:var(--acc3)">PKT</span></div>'
     + '<div style="font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--fd);letter-spacing:.06em">LIVE-VORSCHAU</div></div>'
@@ -2506,15 +2085,75 @@ SCKR.fahrtenbuch.clearAll = async function() {
 SCKR.fahrtenbuch.exportJSON = function() {
   var st = SCKR.fahrtenbuch.state;
   var data = {version:2, exported:new Date().toISOString(), profile:st.profile, trips:st.trips, boats:st.boats, branding:SCKR.admin.state.branding, sponsors:SCKR.admin.state.sponsors};
-  var blob = new Blob([JSON.stringify(data,null,2)], {type:"application/json"});
+  var filename = "SCKR_Fahrtenbuch_"+new Date().toISOString().slice(0,10)+".json";
+  var json = JSON.stringify(data, null, 2);
+
+  // Zeige Auswahl-Sheet
+  var esc = SCKR.core.fmt.esc;
+  var html = '<div class="sheet-hd"><h3>BACKUP SPEICHERN</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>'
+    + '<div class="pnl"><div class="phd"><span class="phd-t">Wo speichern?</span></div>'
+    + '<div style="padding:14px;display:flex;flex-direction:column;gap:10px">'
+
+    // Option 1: Direkt herunterladen (Browser Download)
+    + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch._doExportDownload()" style="text-align:left;padding:16px">'
+    + '<div style="font-family:var(--fd);font-size:16px;font-weight:900">&#8595; HERUNTERLADEN</div>'
+    + '<div style="font-size:12px;color:rgba(255,255,255,.7);margin-top:3px;font-weight:400">Datei direkt im Browser speichern</div>'
+    + '</button>'
+
+    // Option 2: Teilen / iCloud (iOS Share Sheet)
+    + '<button type="button" class="btn btn-navy" onclick="SCKR.fahrtenbuch._doExportShare()" style="text-align:left;padding:16px;background:var(--bg3);border:2px solid var(--bdr);color:var(--wh)">'
+    + '<div style="font-family:var(--fd);font-size:16px;font-weight:900">&#8679; TEILEN / iCLOUD</div>'
+    + '<div style="font-size:12px;color:var(--mut);margin-top:3px;font-weight:400">iOS Share-Sheet: iCloud Drive, Dateien, AirDrop...</div>'
+    + '</button>'
+
+    + '<div style="font-size:11px;color:var(--mut);line-height:1.6;padding:4px 0">'
+    + 'Dateiname: <strong style="color:var(--off)">'+esc(filename)+'</strong><br>'
+    + (st.trips.length)+' Fahrten &mdash; Stand: '+new Date().toLocaleDateString("de-DE")
+    + '</div>'
+    + '</div></div>';
+
+  // Backup fuer Export-Funktionen zwischenspeichern
+  SCKR.fahrtenbuch._exportCache = {json: json, filename: filename};
+  SCKR.core.ui.openSheet(html);
+};
+
+SCKR.fahrtenbuch._doExportDownload = function() {
+  var cache = SCKR.fahrtenbuch._exportCache;
+  if(!cache) return;
+  var blob = new Blob([cache.json], {type:"application/json"});
   var url = URL.createObjectURL(blob);
   var a = document.createElement("a");
-  a.href = url;
-  a.download = "SCKR_Fahrtenbuch_"+new Date().toISOString().slice(0,10)+".json";
-  a.click();
-  URL.revokeObjectURL(url);
-  SCKR.core.ui.toast("JSON-BACKUP HERUNTERGELADEN");
+  a.href = url; a.download = cache.filename; a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  SCKR.core.ui.closeSheet();
+  SCKR.core.ui.toast("BACKUP HERUNTERGELADEN");
 };
+
+SCKR.fahrtenbuch._doExportShare = function() {
+  var cache = SCKR.fahrtenbuch._exportCache;
+  if(!cache) return;
+  var blob = new Blob([cache.json], {type:"application/json"});
+  var file = new File([blob], cache.filename, {type:"application/json"});
+  // iOS Web Share API mit Datei
+  if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
+    navigator.share({
+      files: [file],
+      title: "SCKR Fahrtenbuch Backup",
+      text: "Backup vom "+new Date().toLocaleDateString("de-DE")
+    }).then(function(){
+      SCKR.core.ui.closeSheet();
+      SCKR.core.ui.toast("GETEILT");
+    }).catch(function(e){
+      if(e.name !== "AbortError") SCKR.core.ui.toast("FEHLER: "+e.message);
+    });
+  } else {
+    // Fallback: normaler Download wenn Share API nicht verfuegbar
+    SCKR.fahrtenbuch._doExportDownload();
+    SCKR.core.ui.toast("SHARE NICHT VERFUEGBAR - DOWNLOAD GESTARTET");
+  }
+};
+
 
 SCKR.fahrtenbuch.saveToFiles = function() {
   SCKR.fahrtenbuch.exportJSON();
@@ -2524,27 +2163,123 @@ SCKR.fahrtenbuch.saveToFiles = function() {
 SCKR.fahrtenbuch.importJSON = function(input) {
   var file = input.files[0]; if(!file) return;
   file.text().then(function(text) {
-    var data = JSON.parse(text);
-    if(!confirm((data.trips?data.trips.length:0)+" Fahrten importieren?")) return;
-    var st = SCKR.fahrtenbuch.state;
-    var added = 0;
-    var promises = [];
-    for(var i=0;i<(data.trips||[]).length;i++) {
-      var found = false;
-      for(var j=0;j<st.trips.length;j++) if(st.trips[j].id===data.trips[i].id) { found = true; break; }
-      if(!found) { promises.push(SCKR.fahrtenbuch.saveTrip(data.trips[i])); added++; }
-    }
-    Promise.all(promises).then(function() {
-      if(data.boats) { st.boats = data.boats; SCKR.core.storage.set("boats", st.boats); }
-      if(data.branding) { SCKR.admin.state.branding = data.branding; SCKR.core.storage.set("admin_branding", data.branding); SCKR.admin.applyBranding(); }
-      if(data.sponsors) { SCKR.admin.state.sponsors = data.sponsors; SCKR.core.storage.set("admin_sponsors", data.sponsors); SCKR.admin.renderSponsors(); }
-      SCKR.core.ui.toast(added+" FAHRTEN IMPORTIERT");
-      SCKR.core.goto(SCKR.core.currentTab);
-    });
-  }).catch(function(e){ SCKR.core.ui.toast("IMPORT-FEHLER"); });
+    var data;
+    try { data = JSON.parse(text); } catch(e) { SCKR.core.ui.toast("UNGUELTIGE JSON-DATEI"); return; }
+    var incoming = data.trips || [];
+    if(incoming.length === 0) { SCKR.core.ui.toast("KEINE FAHRTEN IN DATEI"); return; }
+    SCKR.fahrtenbuch.showMergePreview(incoming);
+  }).catch(function(e){ SCKR.core.ui.toast("IMPORT-FEHLER: "+e.message); });
   input.value = "";
 };
 
+SCKR.fahrtenbuch.showMergePreview = function(incoming) {
+  var st = SCKR.fahrtenbuch.state;
+  var existing = st.trips || [];
+  var esc = SCKR.core.fmt.esc;
+
+  // Classify: neu, Duplikat (gleiche ID), aehnlich (gleiche Zeit/Strecke)
+  var results = incoming.map(function(t) {
+    // Exact duplicate: same ID
+    var exactDup = existing.find(function(e){ return e.id === t.id; });
+    if(exactDup) return {trip:t, status:"duplikat", match:exactDup};
+    // Similar: same date + similar km (within 0.5km)
+    var similar = existing.find(function(e){
+      return e.date === t.date && Math.abs((e.km||0)-(t.km||0)) < 0.5;
+    });
+    if(similar) return {trip:t, status:"aehnlich", match:similar};
+    return {trip:t, status:"neu"};
+  });
+
+  var neuCount   = results.filter(function(r){return r.status==="neu";}).length;
+  var dupCount   = results.filter(function(r){return r.status==="duplikat";}).length;
+  var simCount   = results.filter(function(r){return r.status==="aehnlich";}).length;
+
+  var html = '<div class="sheet-hd"><h3>BACKUP ZUSAMMENFUEHREN</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>';
+
+  // Summary
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Zusammenfassung</span></div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr">';
+  html += '<div style="padding:16px;text-align:center;border-right:1px solid var(--bdr2)">'
+    + '<div style="font-family:var(--fd);font-size:32px;font-weight:900;color:#4ecf88">'+neuCount+'</div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:4px">NEU</div></div>';
+  html += '<div style="padding:16px;text-align:center;border-right:1px solid var(--bdr2)">'
+    + '<div style="font-family:var(--fd);font-size:32px;font-weight:900;color:var(--orange)">'+simCount+'</div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:4px">AEHNLICH</div></div>';
+  html += '<div style="padding:16px;text-align:center">'
+    + '<div style="font-family:var(--fd);font-size:32px;font-weight:900;color:var(--mut)">'+dupCount+'</div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:4px">DUPLIKAT</div></div>';
+  html += '</div></div>';
+
+  // Detail list
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Alle Fahrten</span></div>';
+  results.forEach(function(r, i) {
+    var t = r.trip;
+    var statusColor = r.status==="neu" ? "#4ecf88" : r.status==="aehnlich" ? "var(--orange)" : "var(--mut)";
+    var statusLabel = r.status==="neu" ? "NEU" : r.status==="aehnlich" ? "AEHNLICH" : "DUPLIKAT";
+    var checked = r.status !== "duplikat"; // Auto-check new + similar
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--bdr2)">'
+      + '<input type="checkbox" id="merge-cb-'+i+'" '+(checked?"checked":"")+' style="width:18px;height:18px;accent-color:var(--acc);flex-shrink:0">'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:13px;font-weight:600;color:var(--wh)">'+esc(t.date||"")+'&nbsp;&nbsp;'+esc(t.boat||"")+'</div>'
+      + '<div style="font-size:11px;color:var(--mut)">'+(t.km||0).toFixed(2)+' km &mdash; '+(t.points||0)+' Pkt'
+      + (r.match ? ' &mdash; <em>'+esc(r.status==="duplikat"?"Gleiche ID":"Aehnliche Fahrt am "+r.match.date)+'</em>' : '')
+      + '</div></div>'
+      + '<span style="font-family:var(--fd);font-size:10px;font-weight:800;padding:2px 7px;border-radius:3px;background:'+statusColor+'22;color:'+statusColor+'">'+statusLabel+'</span>'
+      + '</div>';
+  });
+  html += '</div>';
+
+  // Action buttons
+  html += '<div style="padding:14px;display:flex;gap:8px">'
+    + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.executeMerge(SCKR.fahrtenbuch._mergeQueue)" style="flex:2">ZUSAMMENFUEHREN</button>'
+    + '<button type="button" class="btn btn-ghost" onclick="SCKR.core.ui.closeSheet()" style="flex:1">ABBRECHEN</button>'
+    + '</div>';
+
+  SCKR.fahrtenbuch._mergeQueue = results;
+  SCKR.core.ui.openSheet(html);
+};
+
+SCKR.fahrtenbuch.executeMerge = async function(results) {
+  var st = SCKR.fahrtenbuch.state;
+  var added = 0, skipped = 0, marked = 0;
+
+  for(var i = 0; i < results.length; i++) {
+    var cb = document.getElementById("merge-cb-"+i);
+    var checked = cb ? cb.checked : false;
+    if(!checked) { skipped++; continue; }
+
+    var r = results[i];
+    var t = Object.assign({}, r.trip);
+
+    // Mark similar trips for manual review
+    if(r.status === "aehnlich") {
+      t._mergeFlag = "aehnlich";
+      t._mergeFlagNote = "Importiert - aehnliche Fahrt existiert am "+r.match.date;
+      marked++;
+    }
+
+    // Duplikate die manuell angehaket wurden: neue ID vergeben
+    if(r.status === "duplikat") {
+      t.id = SCKR.core.util.uuid();
+      t._mergeFlag = "duplikat";
+      t._mergeFlagNote = "Importiert als Kopie (Original-ID: "+r.trip.id+")";
+      marked++;
+    }
+
+    await SCKR.fahrtenbuch.saveTrip(t);
+    added++;
+  }
+
+  SCKR.core.ui.closeSheet();
+  await SCKR.fahrtenbuch.loadTrips();
+  SCKR.core.goto("trips");
+
+  var msg = added+" importiert";
+  if(skipped > 0) msg += ", "+skipped+" uebersprungen";
+  if(marked > 0) msg += ", "+marked+" markiert";
+  SCKR.core.ui.toast(msg.toUpperCase());
+};
 /* -- Cloud Sync (JSONBin.io) -- */
 SCKR.fahrtenbuch.cloud = {
   timer: null,
@@ -2642,9 +2377,12 @@ SCKR.fahrtenbuch.exportExcel = async function() {
       var cls = [t.boatClass,t.sailNumber].filter(Boolean).join(" ");
       if(cls) sheet = inject(sheet,"C"+r,inlCell("C"+r,cls));
       if(t.yachtName) sheet = inject(sheet,"D"+r,inlCell("D"+r,t.yachtName));
-      if(t.sailKm) sheet = inject(sheet,"E"+r,numCell("E"+r,t.sailKm));
-      if(t.sailSm) sheet = inject(sheet,"F"+r,numCell("F"+r,t.sailSm));
-      if(t.motorKm) sheet = inject(sheet,"G"+r,numCell("G"+r,t.motorKm));
+      // Segel-km: bevorzuge GPS-Segel (segelKm), Fallback auf sailKm
+      var exSegelKm = t.segelKm || t.sailKm || 0;
+      var exMotorKm = t.motorKmGps || t.motorKm || 0;
+      if(exSegelKm) sheet = inject(sheet,"E"+r,numCell("E"+r,exSegelKm));
+      if(t.sailSm)  sheet = inject(sheet,"F"+r,numCell("F"+r,t.sailSm));
+      if(exMotorKm) sheet = inject(sheet,"G"+r,numCell("G"+r,exMotorKm));
       if(t.motorSm) sheet = inject(sheet,"H"+r,numCell("H"+r,t.motorSm));
       if(t.fernKm) sheet = inject(sheet,"I"+r,numCell("I"+r,t.fernKm));
       if(t.bridges) sheet = inject(sheet,"J"+r,numCell("J"+r,t.bridges));
@@ -2658,6 +2396,16 @@ SCKR.fahrtenbuch.exportExcel = async function() {
       if(t.cloudiness) sheet = inject(sheet,"V"+r,inlCell("V"+r,t.cloudiness));
       var wind = [t.windDir,t.windForce].filter(Boolean).join(" ");
       if(wind) sheet = inject(sheet,"W"+r,inlCell("W"+r,wind));
+      // Neue Felder: Vmax, Durchschnitt, Pausen, Segelzeit, Motorzeit
+      if(t.maxSpeed)  sheet = inject(sheet,"X"+r,numCell("X"+r,Math.round((t.maxSpeed*3.6)*10)/10));
+      if(t.avgSpeed)  sheet = inject(sheet,"Y"+r,numCell("Y"+r,t.avgSpeed));
+      if(t.pauseMs)   sheet = inject(sheet,"Z"+r,numCell("Z"+r,Math.round(t.pauseMs/60000)));
+      var segelMin = t.segelMs ? Math.round(t.segelMs/60000) : 0;
+      var motorMin = t.motorMs ? Math.round(t.motorMs/60000) : 0;
+      if(segelMin)    sheet = inject(sheet,"AA"+r,numCell("AA"+r,segelMin));
+      if(motorMin)    sheet = inject(sheet,"AB"+r,numCell("AB"+r,motorMin));
+      if(t.anchorEvents && t.anchorEvents.length)
+                      sheet = inject(sheet,"AC"+r,numCell("AC"+r,t.anchorEvents.length));
     }
     zip.file("xl/worksheets/sheet1.xml", sheet);
     var blob = await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
