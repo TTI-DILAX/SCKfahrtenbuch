@@ -366,7 +366,7 @@ if('serviceWorker' in navigator) {
   var t=localStorage.getItem('sckr_theme')||'dark';
   document.documentElement.setAttribute('data-theme',t);
   var r=document.documentElement;
-  var colorMap={'acc':'--club-accent','hdr':'--club-header','sec':'--club-second','navtxt':'--club-nav-text','txt':'--club-text'};
+  var colorMap={'acc':'--club-accent','hdr':'--club-header','sec':'--club-second','navtxt':'--club-nav-text','txt':'--club-text','off':'--off','mut':'--mut'};
   Object.keys(colorMap).forEach(function(k){
     var v=localStorage.getItem('sckr_color_'+k+'_'+t);
     if(v) r.style.setProperty(colorMap[k],v);
@@ -584,8 +584,10 @@ SCKR.core.ui = {
   applyLogo: function(b64) {
     var img=document.getElementById("logo-img"), svg=document.getElementById("logo-svg");
     if(!img||!svg) return;
-    if(b64) { img.src=b64; img.style.display="block"; svg.style.display="none"; }
-    else { img.style.display="none"; svg.style.display="block"; }
+    var src = b64 || ("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAEAAAAAAAD//gA8Q1JFQVRPUjogZ2QtanBlZyB2MS4wICh1c2luZyBJSkcgSlBFRyB2NjIpLCBxdWFsaXR5ID0gODIKAP/bAEMAAgEBAgEBAgICAgICAgIDBQMDAwMDBgQEAwUHBgcHBwYHBwgJCwkICAoIBwcKDQoKCwwMDAwHCQ4PDQwOCwwMDP/bAEMBAgICAwMDBgMDBgwIBwgMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDP/AABEIAEsAbgMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AP36UgCgDOR27V8V/wDBUj9vDx1+x94i8M2HhS20KW1160mleW+t3kdHjdPubHT+Bq+PJ/8AgtH8aYpNzP4bf/Y+wP8A/F17eD4cxeJpRrQ2Mp1oQP2YwfWkOR3r8d9H/wCC7nxN0uRPtug+G7xP49nnQ/8As713nhD/AIOFGgkRNe8DXKf33sr9Jv8Axx0SrnwxmMfskfWIH6mA4PaguPrXwx8N/wDguz8H/GMsMepX2o+HpH++dQs3RP8AvtN6V9M/C/8Aav8ABHxf05LnQNe0rVIZOj2l4k1eViMuxND+LDlNfaI9QoqpZ63a6hHuilR6t1zFhRRRQAUUUE4oAKKM80ZoA/O7/gvt4c8zwJ8PtWC/8e9/d2z/APA0R/8A2SvzAvK/YH/guD4c/tn9kGzvAvzaVrtvN/30jx/+z1+P15X6lwhPnwMThr/GZps5b+8htbWKa5ubp0hhiiR5553/AIERE+d3r1fRv+CY/wAdfFmifb4PAFzbQum9EvbyG1ndP9x33/8AfdfVH7L3gDTf2B/2O7P44az4Xh17xh4tube2sJbt/JtfD1pcvsSaabY/kps+eZ0T+4le8W/7eF1/wxR42+Kt7pfhu8vPByXGyLQteTVNP1R02eS6TInyJ8/zo6b0rz804tnSrSpYePwlQw3P8R+O3xs+BfjL4D64lh4y8Oar4euZ/wDU/a0/cT/7kyfI/wDwB64bS/GGreB9TS90bUb/AEq8g+5LazPC6f8AA0r9rdP+EXjf42aXqXhL43aj8N/GHhjxPpSXlnFpVm9lqFlcfx+Tvd96Jv8Akm+/X48/tQfA+/8A2b/jp4k8FX7+dNodzstrj/n6t3+eF/8Avh69PJc6p5hCUKkPeIrUeXRHsHwX/wCC0nxs+CckMV1rNt4tsIP+WOqp++2f9dk+f/vvfX2B8E/+DlzwzLFDb+N/C+t6JN/HcWmy9g/9kf8A8cr8h9R61i6j2/GurE8O4Gv9klVZwP6PfhP/AMFo/gF8VEhW3+IPh6zun/5Zag/2J0/7/bK978KftKeCfH1skuj+J9F1FH/itLyOYf8AjjV/JTqFZv8Aal1pcm+1urm2f+/E7o//AI5Xg1uC6Evgqm6rSeyP7FLfxfp1xnbdQ/nTzr1o4yLiE1/H1p/x4+IOj/JpvjLxnZp/Alvqtyn/AKA9av8Aw1L8ZJI9n/CzvH8Kf7fiG5/+LrxMdkGFwfvYjFRie3lmQ5rmE+XB4eVT/D/8l8J/XcdctDKD5sePXdUlrqVveAmOYMv06V/Oh/wTX/Yb+MP7aHiiw8Q+NfF/j9/AEcyTOl7rFz/xO9n8CI7/AHP77/8AfFfvv8Hvhm/hHwda2RdoRDDHFHGv3YlRdoX9K+ZlKlL/AHeXNH7jXNslqZdNUK84ur9qMfe5f8Uvhv6HmX/BUzw2/iv9hnxtCFV5LeCK7Rc9THMj/wBK/FW88Jy3lu6Sy+T5iOnyfO9fvT+1z4c/4Sf9mbxxYsvnGfR7rC4xj92zf+y1+G951rnxnFeYZbR+r4T3ec/WPCHw/wAmz+lWxOZxlKUJfDzcsfw1/E/XbTfAI+P37GHhDTfDfivWPCTzaRp1xY6npmx3jeFE+R0f5HR9ux0f79fPmsXnw2/YiuPij4Z+IN1qXjPW/H+iQ+Idb/4lttZWWvI7/wBnw2FpaQvs853+T/x/fXBf8E5f+ChWm/BnR18B+OLlrfQjMz6XqT/Ollvfe8Uv+zv+ZH/gr3n9oz9jzwV+2r8bPDXjTVNS0HXvCtj4YvtHeGKbzp/NuXR4bmGZH2I6bH2PWGBzCGKhzv4z4jjbgvHZHmM8PKn+6+zL+aJN+zH+yH4c+E/9m+MJbDxUniqTR4dNht/EGvPq8/h60+R/sELv9xN+zfs/77r86/8AgsH/AGXrn7amq+QsL3NrpVpbXL/7ex3/APQHSvtvxx+2Jpf7C3wCtvDniXx1bfFHx/pUL2dn9nREmuk+5C93sd0R0T77/wAdflT8TPGeo/Efxpquu6zci71XWLl7y5l/vu//ALJXm5tnM6Pu4afJI/UfBngOdfEyzLNMP+65eWPNH4v/AAI4DUNDs8/6pKw9Q0O1B/1CV1GoVlR6NdaxeJBZ2tzeTP8AIiRI7vJ/wBK8VZ9mT2ry/wDApH9B1eE+HqfxYSkv+4cf8jktQ0e1x/x7w1lXlnFH9yKH/vivqL4P/wDBLP43fHi4hbTvBF/pVnP/AMvesf6Emz/cf5//AByvt79l/wD4Nu9Nsri2v/iTr1zrc0fzvp+n74LX/cd/vv8A+OV0weaYr45y/wDApHyGa8VcF5Ir2pc38sYx5v8AyU/Jr4R/APxf+0J4sTQ/Bug3+t37/fS3T9xAn993+4if79fqh/wT7/4N67Lw9eWHiP4p/ZvEOqx7Jk0pP+Qfav8A7f8Az2/9Ar9MPgX+xv4I/Z/8NxaX4e0DTdKs7f7kNrCsaE/33/vv/v161Y2EVkCseEXHQV7GEyaNP36755H4Txd4yY/M4/VssX1el5fFL/5H5HLfDX4O6T8OdLht7W3hTyEVEVE2JH/uV2uMUdKK9lKx+NNtu7MLxjpK674R1OyYblubV4sf7y1+AviSzbS9YvLd/v2kzw/+P7K/oSn+aNl45GPzr8GP2lvD/wDwjPx68aacPk+z6zdxfnM9fMcTQbhGZ/R30ecVavjMO30jL7uY811HrWRcXkunxulvLNCkn30R3T/0CvY/gt+yP40/aA1BP7J02aGwd/nvbjekH/AP7/8AwCvvn9lz/gkZ4X8B/ZtR161/trUo9j77tP3CP/sJXjYLK8TX974In6vxb4nZJkqlSrSVar/LH/24/MT4X/snfEH46XCJ4a8L6leQzv8A8fbp5MP/AH2/yV9P/CD/AIIMeLfF8cNx4r8R22ko/wB+30+Hz3/77f5P/HK/Wbwr8M9J8JWiRW9rCojG1flroIo0T7qhPoa+jo8P4eOs/ePwLOvHHO8UvZ4NRpQ/8Cl/4E/8j4a+FH/BCb4Q+CvJl1fT7vxDcp99tQvHkT/vhNiV9K/DP9kXwD8J7NIvD/hjRdJRP+fWzSH/ANkr1RQc9fyFNZ8HoPxNevRwlGnpCJ+YZhxNmuO/3zETl6yKlj4asNL/ANVAiVejjVBgCnDpRW54rd9WGKMUUUAFFFFAFdEyxKkFccCvl3U/+CYngvxJ8Z/EXjbWmfWr3W71ryK0m+S2tf8AgHR3/wB+vqQjYMDjNKQGZgemKzrUIVbcx6GXZxjsv5vqlRw9ouWXL1XY5LwH8INJ8B2aRW9vCmz5E2pXYRxrGPlpy9BRVpWOBybd2GKKKKYgxRjNFFABRRRQAUUUUAFFFFAH/9k=");
+    img.src = src;
+    img.style.display = "block";
+    svg.style.display = "none";
   },
   mkSw: function(id,on) { return '<button class="sw'+(on?' on':'')+'" id="'+id+'" onclick="this.classList.toggle(\'on\')" type="button"></button>'; },
   swVal: function(id) { var el=document.getElementById(id); return el ? el.classList.contains("on") : false; },
@@ -667,13 +669,15 @@ SCKR.admin.setTheme = function(theme) {
   if(btn) btn.textContent = theme === "dark" ? "&#9728;" : "&#9790;";
 };
 
-SCKR.admin.applyColors = function(acc, hdr, sec, navTxt, txt) {
+SCKR.admin.applyColors = function(acc, hdr, sec, navTxt, txt, off, mut) {
   var r = document.documentElement;
   if(acc)    { r.style.setProperty("--club-accent",   acc);    r.style.setProperty("--acc", acc); }
   if(hdr)    { r.style.setProperty("--club-header",   hdr);    r.style.setProperty("--nav", hdr); }
   if(sec)    { r.style.setProperty("--club-second",   sec);    r.style.setProperty("--acc2", sec); }
   if(navTxt) { r.style.setProperty("--club-nav-text", navTxt); r.style.setProperty("--nav-text", navTxt); }
   if(txt)    { r.style.setProperty("--club-text",     txt);    r.style.setProperty("--wh", txt); }
+  if(off)    { r.style.setProperty("--club-off",      off);    r.style.setProperty("--off", off); }
+  if(mut)    { r.style.setProperty("--club-mut",      mut);    r.style.setProperty("--mut", mut); }
 };
 
 SCKR.admin.applyColorsByTheme = function() {
@@ -692,7 +696,11 @@ SCKR.admin.applyColorsByTheme = function() {
   var txt    = localStorage.getItem("sckr_color_txt_"+theme);
   if(!navTxt) navTxt = isLight ? (b.colorNavTxtL||"#FFFFFF") : (b.colorNavTxtD||"#FFFFFF");
   if(!txt)    txt    = isLight ? (b.colorTxtL   ||"#1a1a1a") : (b.colorTxtD   ||"#F0F0F0");
-  SCKR.admin.applyColors(acc, hdr, sec, navTxt, txt);
+  var off = localStorage.getItem("sckr_color_off_"+theme);
+  var mut = localStorage.getItem("sckr_color_mut_"+theme);
+  if(!off) off = isLight ? (b.colorOffL||"#444444") : (b.colorOffD||"#AAAAAA");
+  if(!mut) mut = isLight ? (b.colorMutL||"#999999") : (b.colorMutD||"#666666");
+  SCKR.admin.applyColors(acc, hdr, sec, navTxt, txt, off, mut);
 };
 
 SCKR.admin.previewSponLogo = function(input) {
@@ -719,7 +727,9 @@ SCKR.admin.previewColors = function() {
   }
   var navTxt = (document.getElementById("ad-navtxt"+sfx)||{}).value || "";
   var txt    = (document.getElementById("ad-txt"+sfx)||{}).value || "";
-  SCKR.admin.applyColors(acc||undefined, hdr||undefined, sec||undefined, navTxt||undefined, txt||undefined);
+  var off    = (document.getElementById("ad-off"+sfx)||{}).value || "";
+  var mut    = (document.getElementById("ad-mut"+sfx)||{}).value || "";
+  SCKR.admin.applyColors(acc||undefined, hdr||undefined, sec||undefined, navTxt||undefined, txt||undefined, off||undefined, mut||undefined);
   SCKR.core.ui.toast("VORSCHAU AKTIV - Tippe Speichern um zu behalten");
 };
 
@@ -812,6 +822,20 @@ SCKR.admin.openPanel = function() {
     +   '<input type="color" id="ad-txt-d" value="'+(b.colorTxtD||"#F0F0F0")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px">'
     + '</div></div>'
 
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--bdr2)">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">SEKUNDAER</div>'
+    + '<div><div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-off-l" value="'+(b.colorOffL||"#444444")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px"></div>'
+    + '<div><div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-off-d" value="'+(b.colorOffD||"#AAAAAA")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px"></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:6px;padding:8px 14px">'
+    + '<div style="font-size:10px;color:var(--mut);font-weight:700;letter-spacing:.06em;width:60px">GRAU/MUT</div>'
+    + '<div><div style="font-size:9px;color:var(--mut);margin-bottom:3px">HELL-MODUS</div>'
+    +   '<input type="color" id="ad-mut-l" value="'+(b.colorMutL||"#999999")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px"></div>'
+    + '<div><div style="font-size:9px;color:var(--mut);margin-bottom:3px">DUNKEL-MODUS</div>'
+    +   '<input type="color" id="ad-mut-d" value="'+(b.colorMutD||"#666666")+'" style="width:100%;height:32px;border:1px solid var(--bdr);border-radius:5px;cursor:pointer;padding:2px"></div>'
+    + '</div>'
     + '<div style="padding:10px 14px;display:flex;gap:8px">'
     + '<button type="button" onclick="SCKR.admin.previewColors()" class="btn btn-ghost" style="flex:1;padding:9px;font-size:12px">VORSCHAU</button>'
     + '<button type="button" onclick="SCKR.admin.resetColors()" class="btn btn-ghost" style="flex:1;padding:9px;font-size:12px">RESET</button>'
@@ -896,8 +920,17 @@ SCKR.admin.saveAll = async function() {
   var curTxt    = isLight ? (b.colorTxtL   ||"#1a1a1a")  : (b.colorTxtD   ||"#F0F0F0");
   localStorage.setItem("sckr_color_navtxt_"+theme, curNavTxt);
   localStorage.setItem("sckr_color_txt_"+theme, curTxt);
+  // Sekundaer-Schrift + Grau
+  var offL = g("ad-off-l"); var offD = g("ad-off-d");
+  var mutL = g("ad-mut-l"); var mutD = g("ad-mut-d");
+  if(offL) b.colorOffL = offL; if(offD) b.colorOffD = offD;
+  if(mutL) b.colorMutL = mutL; if(mutD) b.colorMutD = mutD;
+  var curOff = isLight ? (b.colorOffL||"#444444") : (b.colorOffD||"#AAAAAA");
+  var curMut = isLight ? (b.colorMutL||"#999999") : (b.colorMutD||"#666666");
+  localStorage.setItem("sckr_color_off_"+theme, curOff);
+  localStorage.setItem("sckr_color_mut_"+theme, curMut);
   // Wende sofort an
-  SCKR.admin.applyColors(curAcc, curHdr, curSec, curNavTxt, curTxt);
+  SCKR.admin.applyColors(curAcc, curHdr, curSec, curNavTxt, curTxt, curOff, curMut);
   b.clubName = (document.getElementById("ad-club")||{}).value||b.clubName;
   b.appTitle = (document.getElementById("ad-title")||{}).value||b.appTitle;
   SCKR.admin.state.sponsors.footer = newText ? [newText] : [];
@@ -1638,26 +1671,42 @@ SCKR.fahrtenbuch.render = {
 };
 
 // Compass SVG
-SCKR.fahrtenbuch.render.compassSVG = function(heading) {
+SCKR.fahrtenbuch.render.compassSVG = function(heading, windDir) {
   var h = heading || 0;
-  return '<svg class="compass" viewBox="0 0 100 100">'
-    + '<defs><radialGradient id="cbg" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#163555"/><stop offset="100%" stop-color="#03101e"/></radialGradient></defs>'
-    + '<circle cx="50" cy="50" r="46" fill="url(#cbg)" stroke="#C8A84B" stroke-width="1.5"/>'
-    + '<circle cx="50" cy="50" r="40" fill="none" stroke="#8C7030" stroke-width=".5" opacity=".5"/>'
-    // Cardinal marks
-    + '<text x="50" y="15" text-anchor="middle" fill="#C8A84B" font-family="Barlow Condensed" font-size="9" font-weight="800">N</text>'
-    + '<text x="88" y="54" text-anchor="middle" fill="#8C7030" font-family="Barlow Condensed" font-size="8" font-weight="700">O</text>'
-    + '<text x="50" y="92" text-anchor="middle" fill="#8C7030" font-family="Barlow Condensed" font-size="8" font-weight="700">S</text>'
-    + '<text x="12" y="54" text-anchor="middle" fill="#8C7030" font-family="Barlow Condensed" font-size="8" font-weight="700">W</text>'
-    // Heading needle
-    + '<g transform="rotate('+h+' 50 50)">'
-    + '<path d="M 50 12 L 45 50 L 55 50 Z" fill="#1AABA0" stroke="#fff" stroke-width=".5"/>'
-    + '<path d="M 50 88 L 45 50 L 55 50 Z" fill="#C0392B" opacity=".8"/>'
-    + '<circle cx="50" cy="50" r="3" fill="#C8A84B" stroke="#03101e" stroke-width=".5"/>'
-    + '</g>'
-    // Heading number
-    + '<text x="50" y="68" text-anchor="middle" fill="#E2C46A" font-family="Barlow Condensed" font-size="10" font-weight="800">'+Math.round(h)+'&#176;</text>'
-    + '</svg>';
+  var w = (windDir !== null && windDir !== undefined) ? windDir : null;
+  var dir = SCKR.core.fmt.compass ? SCKR.core.fmt.compass(h) : ["N","NO","O","SO","S","SW","W","NW"][Math.round(h/45)%8];
+
+  var arc = function(deg, r) {
+    var rad = (deg - 90) * Math.PI / 180;
+    return {x: 50 + r * Math.cos(rad), y: 50 + r * Math.sin(rad)};
+  };
+  var arcPath = function(from, to, r) {
+    var p1=arc(from,r), p2=arc(to,r);
+    var large=(to-from+360)%360>180?1:0;
+    return "M"+p1.x.toFixed(1)+" "+p1.y.toFixed(1)+" A"+r+" "+r+" 0 "+large+" 1 "+p2.x.toFixed(1)+" "+p2.y.toFixed(1);
+  };
+
+  var hArc = arcPath(h-15, h+15, 39);
+  var wArc = w!==null ? arcPath(w-8, w+8, 32) : null;
+
+  var svg = '<svg class="compass" viewBox="0 0 100 100">';
+  svg += '<circle cx="50" cy="50" r="47" fill="#0d0d0d" stroke="rgba(255,255,255,.07)" stroke-width="1"/>';
+  svg += '<circle cx="50" cy="50" r="41" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="6"/>';
+  // Tick marks
+  for(var d=0;d<360;d+=30){var p1=arc(d,43),p2=arc(d,38);svg+='<line x1="'+p1.x.toFixed(1)+'" y1="'+p1.y.toFixed(1)+'" x2="'+p2.x.toFixed(1)+'" y2="'+p2.y.toFixed(1)+'" stroke="rgba(255,255,255,.15)" stroke-width="1.2"/>';}
+  // Wind arc (teal)
+  if(wArc) svg += '<path d="'+wArc+'" fill="none" stroke="#1AABA0" stroke-width="5" stroke-linecap="round" opacity=".75"/>';
+  // Heading arc (accent)
+  svg += '<path d="'+hArc+'" fill="none" stroke="var(--acc,#C8102E)" stroke-width="7" stroke-linecap="round"/>';
+  // Cardinals
+  var cards = [{d:0,l:"N"},{d:90,l:"O"},{d:180,l:"S"},{d:270,l:"W"}];
+  for(var ci=0;ci<cards.length;ci++){var cp=arc(cards[ci].d,28);svg+='<text x="'+cp.x.toFixed(1)+'" y="'+(cp.y+3).toFixed(1)+'" text-anchor="middle" fill="'+(cards[ci].l==="N"?"#fff":"rgba(255,255,255,.45)")+'" font-family="Barlow Condensed" font-size="8" font-weight="'+(cards[ci].l==="N"?900:600)+'">'+cards[ci].l+'</text>';}
+  // Center: degrees
+  svg += '<text x="50" y="46" text-anchor="middle" fill="#fff" font-family="Barlow Condensed" font-size="16" font-weight="900" font-variant-numeric="tabular-nums">'+Math.round(h)+'</text>';
+  svg += '<text x="50" y="57" text-anchor="middle" fill="rgba(255,255,255,.55)" font-family="Barlow Condensed" font-size="7" font-weight="700">'+dir+'</text>';
+  if(w!==null){var wdirStr=["N","NO","O","SO","S","SW","W","NW"][Math.round(((w%360)+360)%360/45)%8];svg+='<text x="50" y="67" text-anchor="middle" fill="#1AABA0" font-family="Barlow Condensed" font-size="6" font-weight="700">&#9660; '+wdirStr+'</text>';}
+  svg += '</svg>';
+  return svg;
 };
 
 // SVG fallback track
