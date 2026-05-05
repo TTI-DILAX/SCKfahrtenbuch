@@ -2181,6 +2181,205 @@ SCKR.fahrtenbuch.saveDetail = async function() {
   SCKR.fahrtenbuch.render.trips();
 };
 
+/* ─── TRIP EDITOR SHEET ───────────────────────────────── */
+SCKR.fahrtenbuch.openDetail = function(tripId) {
+  var st = SCKR.fahrtenbuch.state;
+  var t = null;
+  for(var i=0;i<st.trips.length;i++) if(st.trips[i].id===tripId){t=st.trips[i];break;}
+  if(!t) return;
+  SCKR.fahrtenbuch._detId = tripId;
+  var esc = SCKR.core.fmt.esc;
+  var pts = Math.round(SCKR.fahrtenbuch.points.trip(t));
+  var activeBoat = SCKR.fahrtenbuch.getActiveBoat();
+
+  var startT = t.startTime ? new Date(t.startTime).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "";
+  var endT   = t.endTime   ? new Date(t.endTime).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "";
+
+  var html = '<div class="sheet-hd"><h3>'+esc(t.date||"Fahrt")+'</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>';
+
+  // Punkte-Vorschau
+  html += '<div class="pts-box"><div style="font-family:var(--fd);font-size:52px;font-weight:900;color:var(--acc);font-variant-numeric:tabular-nums" id="dt-pts-preview">'+pts+' <span style="font-size:20px;font-weight:600;color:var(--mut)">PKT</span></div>'
+    + '<div style="font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--fd);letter-spacing:.06em">LIVE-VORSCHAU</div></div>';
+
+  html += '<div style="display:flex;gap:8px;margin-top:12px">'
+    + '<button class="btn btn-red" type="button" onclick="SCKR.fahrtenbuch.saveDetail()" style="flex:2">SPEICHERN</button>'
+    + '<button type="button" onclick="SCKR.fahrtenbuch.confirmDelTrip(\''+t.id+'\')" style="flex:1;padding:14px 16px;border-radius:var(--r);border:none;background:rgba(192,57,43,.2);color:#e74c3c;font-weight:700;cursor:pointer;font-family:var(--fd);font-size:14px">LOESCHEN</button>'
+    + '</div>';
+
+  // Basic info
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Grunddaten</span></div>'
+    + '<div class="fld"><label class="lbl">Datum</label><input class="inp" id="dt-date" type="date" value="'+esc(t.date||"")+'"></div>'
+    + '<div class="fld"><label class="lbl">Beschreibung / Route</label><input class="inp" id="dt-desc" value="'+esc(t.description||t.route||"")+'" placeholder="z.B. Kruepelsee - Wolzig"></div>'
+    + '<div class="fld"><label class="lbl">Kategorie</label><select class="inp" id="dt-cat"><option value="Binnen"'+(t.category==="Binnen"?" selected":"")+'>Binnen</option><option value="Kueste"'+(t.category==="Kueste"?" selected":"")+'>Kueste</option><option value="Hochsee"'+(t.category==="Hochsee"?" selected":"")+'>Hochsee</option></select></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0"><div class="fld"><label class="lbl">Start</label><input class="inp" id="dt-st" type="time" value="'+startT+'"></div>'
+    + '<div class="fld"><label class="lbl">Ende</label><input class="inp" id="dt-et" type="time" value="'+endT+'"></div></div>'
+    + '</div>';
+
+  // Boot
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Boot</span></div>'
+    + '<div class="fld"><label class="lbl">Bootsklasse</label><input class="inp" id="dt-cls" value="'+esc(t.boatClass||"")+'" placeholder="z.B. H-Jolle"></div>'
+    + '<div class="fld"><label class="lbl">Segelnummer</label><input class="inp" id="dt-sn" value="'+esc(t.sailNumber||"")+'" placeholder="z.B. GER 1234"></div>'
+    + '<div class="fld"><label class="lbl">Yachtname</label><input class="inp" id="dt-yn" value="'+esc(t.yachtName||"")+'" placeholder="z.B. Moewe"></div>'
+    + '</div>';
+
+  // Strecke
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Strecke</span></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">'
+    + '<div class="fld"><label class="lbl">Segel-km</label><input class="inp" id="dt-sk" type="number" step="0.01" value="'+(t.sailKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
+    + '<div class="fld"><label class="lbl">Motor-km</label><input class="inp" id="dt-mk" type="number" step="0.01" value="'+(t.motorKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
+    + '<div class="fld"><label class="lbl">Segel-sm</label><input class="inp" id="dt-ss" type="number" step="0.01" value="'+(t.sailSm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
+    + '<div class="fld"><label class="lbl">Motor-sm</label><input class="inp" id="dt-ms" type="number" step="0.01" value="'+(t.motorSm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
+    + '</div>'
+    + '<div class="fld"><label class="lbl">Fernfahrt (km)</label><input class="inp" id="dt-fk" type="number" step="0.01" value="'+(t.fernKm||0)+'" oninput="SCKR.fahrtenbuch.updatePtsPreview()"></div>'
+    + '</div>';
+
+  // Infrastruktur
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Brücken &amp; Schleusen</span></div>'
+    + '<div class="fld"><label class="lbl">Brücken</label>'+SCKR.core.ui.mkStp("dt-br", t.bridges||0, 0, 99, "SCKR.fahrtenbuch.updatePtsPreview()")+'</div>'
+    + '<div class="fld"><label class="lbl">Schleusen</label>'+SCKR.core.ui.mkStp("dt-lk", t.locks||0, 0, 99, "SCKR.fahrtenbuch.updatePtsPreview()")+'</div>'
+    + '</div>';
+
+  // Extras
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Extras</span></div>'
+    + '<div class="trow"><span>Trailer</span>'+SCKR.core.ui.mkSw("dt-tr",t.isTrailered)+'</div>'
+    + '<div class="trow"><span>Gemeinschaftsfahrt</span>'+SCKR.core.ui.mkSw("dt-cm",t.isCommunity)+'</div>'
+    + '<div class="trow"><span>Regatta-Fahrtzeichen</span>'+SCKR.core.ui.mkSw("dt-rf",t.hasRegattaFn)+'</div>'
+    + '</div>';
+
+  // Track + Stats (wenn GPS)
+  if(t.trackPoints && t.trackPoints.length > 1) {
+    html += '<div class="pnl"><div class="phd"><span class="phd-t">GPS-Track ('+t.trackPoints.length+' Punkte)</span></div>'
+      + '<div id="detail-map" style="height:240px;width:100%;border-radius:8px;overflow:hidden;border:1px solid var(--bdr2);background:#0a1e38"></div>'
+      + '<div style="padding:10px 14px"><button type="button" onclick="SCKR.fahrtenbuch.rerunOSM(\''+t.id+'\')" class="btn btn-ghost" style="font-size:13px;padding:10px">OSM BRUECKEN/SCHLEUSEN ERKENNEN</button></div></div>';
+  }
+
+  // Segment stats
+  if(t.avgSpeed || t.maxSpeed || t.segelKm) {
+    var segelKm=(t.segelKm||t.sailKm||0).toFixed(2), motorKm=(t.motorKm||0).toFixed(2);
+    var segelMin=Math.round((t.segelMs||0)/60000), motorMin=Math.round((t.motorMs||0)/60000);
+    html += '<div class="pnl"><div class="phd"><span class="phd-t">Fahrt-Statistiken</span></div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--bdr2)">';
+    html += '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--acc)">'+(t.maxSpeed?(t.maxSpeed*3.6).toFixed(1):"-")+'<span style="font-size:11px;color:var(--mut)"> km/h</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">V-MAX</div></div>';
+    html += '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--wh)">'+(t.avgSpeed||0).toFixed(1)+'<span style="font-size:11px;color:var(--mut)"> km/h</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">DURCHSCHNITT</div></div>';
+    html += '<div style="padding:14px 8px;text-align:center"><div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--wh)">'+Math.round((t.pauseMs||0)/60000)+'<span style="font-size:11px;color:var(--mut)"> min</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">PAUSEN</div></div>';
+    html += '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--bdr2)">';
+    html += '<div style="padding:12px 14px;border-right:1px solid var(--bdr2);display:flex;align-items:center;gap:8px"><div style="width:4px;height:28px;border-radius:2px;background:#1E6FBF;flex-shrink:0"></div><div><div style="font-family:var(--fd);font-size:20px;font-weight:900;color:var(--wh)">'+segelKm+' <span style="font-size:11px;color:var(--mut)">km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em">SEGEL &mdash; '+segelMin+' min</div></div></div>';
+    html += '<div style="padding:12px 14px;display:flex;align-items:center;gap:8px"><div style="width:4px;height:28px;border-radius:2px;background:var(--acc);flex-shrink:0"></div><div><div style="font-family:var(--fd);font-size:20px;font-weight:900;color:var(--wh)">'+motorKm+' <span style="font-size:11px;color:var(--mut)">km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em">MOTOR &mdash; '+motorMin+' min</div></div></div>';
+    html += '</div></div>';
+  }
+
+  // Notes
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Notizen</span></div>'
+    + '<div class="fld"><textarea class="inp" id="dt-notes" rows="3" placeholder="Freitext..." style="resize:none">'+esc(t.notes||"")+'</textarea></div></div>';
+
+  if(t.lastEdited) html += '<div style="text-align:center;margin-top:10px;font-size:11px;color:var(--mut)">ZULETZT: '+new Date(t.lastEdited).toLocaleString("de-DE")+'</div>';
+
+  SCKR.core.ui.openSheet(html);
+
+  if(t.trackPoints && t.trackPoints.length > 1) {
+    setTimeout(function(){ SCKR.fahrtenbuch.render.showMap("detail-map", t.trackPoints, t.infraEvents||[]); }, 350);
+  }
+};
+
+/* ─── NEW TRIP ─────────────────────────────────────────── */
+SCKR.fahrtenbuch.openNewTrip = function() {
+  var t = SCKR.fahrtenbuch.newTrip();
+  var b = SCKR.fahrtenbuch.getActiveBoat();
+  if(b) { t.boatId=b.id; t.boatClass=b.boatClass||""; t.sailNumber=b.sailNumber||""; t.yachtName=b.name||""; }
+  SCKR.fahrtenbuch.state.trips.unshift(t);
+  SCKR.fahrtenbuch.openDetail(t.id);
+};
+
+/* ─── BOAT EDITOR ──────────────────────────────────────── */
+SCKR.fahrtenbuch.openBoatEditor = function(boatId) {
+  var st = SCKR.fahrtenbuch.state;
+  var esc = SCKR.core.fmt.esc;
+  var b = boatId ? st.boats.find(function(x){return x.id===boatId;}) : SCKR.fahrtenbuch.newBoat();
+  if(!b) { b = SCKR.fahrtenbuch.newBoat(); }
+  var isNew = !boatId;
+
+  var html = '<div class="sheet-hd"><h3>'+(isNew?"Neues Boot":"Boot bearbeiten")+'</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>';
+
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Boot-Daten</span></div>'
+    + '<div class="fld"><label class="lbl">Name</label><input class="inp" id="be-name" value="'+esc(b.name||"")+'" placeholder="z.B. Moewe"></div>'
+    + '<div class="fld"><label class="lbl">Bootsklasse</label><input class="inp" id="be-cls" value="'+esc(b.boatClass||b.klasse||"")+'" placeholder="z.B. H-Jolle, 15er JK"></div>'
+    + '<div class="fld"><label class="lbl">Segelnummer</label><input class="inp" id="be-sn" value="'+esc(b.sailNumber||"")+'" placeholder="z.B. GER 1234"></div>'
+    + '<div class="fld"><label class="lbl">Kategorie</label><select class="inp" id="be-cat"><option value="Binnen"'+(b.category==="Binnen"?" selected":"")+'>Binnen</option><option value="Kueste"'+(b.category==="Kueste"?" selected":"")+'>Kueste</option><option value="Hochsee"'+(b.category==="Hochsee"?" selected":"")+'>Hochsee</option></select></div>'
+    + '</div>';
+
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Heimathafen</span></div>'
+    + '<div class="fld"><label class="lbl">Name</label><input class="inp" id="be-hpn" value="'+esc(b.homePortName||"")+'" placeholder="z.B. SCKR Kruepelsee"></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">'
+    + '<div class="fld"><label class="lbl">Breitengrad</label><input class="inp" id="be-lat" type="number" step="0.0001" value="'+(b.homePortLat||52.3218)+'"></div>'
+    + '<div class="fld"><label class="lbl">Laengengrad</label><input class="inp" id="be-lng" type="number" step="0.0001" value="'+(b.homePortLon||13.6538)+'"></div>'
+    + '</div>'
+    + '<div class="fld"><button type="button" class="btn btn-ghost" style="padding:10px;font-size:13px" onclick="SCKR.fahrtenbuch.setBoatHomeFromGPS()">GPS-POSITION ALS HEIMATHAFEN</button></div>'
+    + '</div>';
+
+  if(!isNew) {
+    html += '<button type="button" class="btn btn-ghost" onclick="SCKR.fahrtenbuch.deletBoat(\''+b.id+'\')" style="margin-top:8px;color:#e74c3c;border-color:#e74c3c">BOOT LOESCHEN</button>';
+  }
+  html += '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.saveBoat(\''+esc(b.id)+'\')" style="margin-top:8px">BOOT SPEICHERN</button>';
+
+  SCKR.fahrtenbuch._editBoatId = b.id;
+  if(isNew) st.boats.push(b);
+  SCKR.core.ui.openSheet(html);
+};
+
+SCKR.fahrtenbuch.setActiveBoat = function(boatId) {
+  SCKR.fahrtenbuch.state.selectedBoatId = boatId;
+  SCKR.core.storage.set("selectedBoatId", boatId);
+  SCKR.fahrtenbuch.render.settings();
+};
+
+SCKR.fahrtenbuch.setBoatHomeFromGPS = function() {
+  var pos = SCKR.fahrtenbuch.state.currentPos;
+  if(!pos) { SCKR.core.ui.toast("GPS NICHT AKTIV"); return; }
+  var latEl = document.getElementById("be-lat");
+  var lngEl = document.getElementById("be-lng");
+  if(latEl) latEl.value = pos.lat.toFixed(6);
+  if(lngEl) lngEl.value = pos.lng.toFixed(6);
+  SCKR.core.ui.toast("HEIMATHAFEN GESETZT");
+};
+
+SCKR.fahrtenbuch.saveBoat = async function(boatId) {
+  var st = SCKR.fahrtenbuch.state;
+  var b = st.boats.find(function(x){return x.id===boatId;});
+  if(!b) return;
+  b.name        = (document.getElementById("be-name")||{}).value||b.name;
+  b.boatClass   = (document.getElementById("be-cls")||{}).value||"";
+  b.klasse      = b.boatClass;
+  b.sailNumber  = (document.getElementById("be-sn")||{}).value||"";
+  b.category    = (document.getElementById("be-cat")||{}).value||"Binnen";
+  b.homePortName= (document.getElementById("be-hpn")||{}).value||"";
+  b.homePortLat = +(document.getElementById("be-lat")||{}).value||0;
+  b.homePortLon = +(document.getElementById("be-lng")||{}).value||0;
+  await SCKR.core.storage.set("boats", st.boats);
+  SCKR.core.ui.closeSheet();
+  SCKR.core.ui.toast("BOOT GESPEICHERT");
+  if(!st.selectedBoatId) st.selectedBoatId = b.id;
+  SCKR.fahrtenbuch.render.settings();
+};
+
+SCKR.fahrtenbuch.deletBoat = async function(boatId) {
+  if(!confirm("Boot loeschen?")) return;
+  var st = SCKR.fahrtenbuch.state;
+  st.boats = st.boats.filter(function(b){return b.id!==boatId;});
+  if(st.selectedBoatId === boatId) st.selectedBoatId = st.boats[0]?st.boats[0].id:null;
+  await SCKR.core.storage.set("boats", st.boats);
+  SCKR.core.ui.closeSheet();
+  SCKR.fahrtenbuch.render.settings();
+};
+
+SCKR.fahrtenbuch.getActiveBoatHome = function() {
+  var b = SCKR.fahrtenbuch.getActiveBoat();
+  if(b && b.homePortLat && b.homePortLon) return {lat:b.homePortLat, lng:b.homePortLon};
+  return null;
+};
+
 SCKR.fahrtenbuch.removeInfra = function(tripId, infraId) {
   var st = SCKR.fahrtenbuch.state;
   var t = null;
