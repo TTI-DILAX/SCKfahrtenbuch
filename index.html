@@ -666,7 +666,7 @@ SCKR.admin.setTheme = function(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("sckr_theme", theme);
   var btn = document.getElementById("theme-btn");
-  if(btn) btn.textContent = theme === "dark" ? "&#9728;" : "&#9790;";
+  if(btn) btn.innerHTML = theme === "dark" ? "☀" : "☽";
 };
 
 SCKR.admin.applyColors = function(acc, hdr, sec, navTxt, txt, off, mut) {
@@ -843,8 +843,8 @@ SCKR.admin.openPanel = function() {
 
     + '<div class="pnl"><div class="phd"><span class="phd-t">Hell / Dunkel Modus</span></div>'
     + '<div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    + '<button type="button" onclick="SCKR.admin.setTheme(\'light\')" style="padding:12px;border-radius:6px;border:2px solid var(--acc);background:rgba(255,255,255,.95);color:#1a1a2e;font-family:var(--fd);font-size:14px;font-weight:800;cursor:pointer">&#9728; HELL</button>'
-    + '<button type="button" onclick="SCKR.admin.setTheme(\'dark\')" style="padding:12px;border-radius:6px;border:2px solid var(--teal);background:#0a1628;color:#fff;font-family:var(--fd);font-size:14px;font-weight:800;cursor:pointer">&#9790; DUNKEL</button>'
+    + '<button type="button" onclick="SCKR.admin.setTheme(\'light\')" style="padding:12px;border-radius:6px;border:2px solid var(--acc);background:rgba(255,255,255,.95);color:#1a1a2e;font-family:var(--fd);font-size:14px;font-weight:800;cursor:pointer">☀ HELL</button>'
+    + '<button type="button" onclick="SCKR.admin.setTheme(\'dark\')" style="padding:12px;border-radius:6px;border:2px solid var(--teal);background:#0a1628;color:#fff;font-family:var(--fd);font-size:14px;font-weight:800;cursor:pointer">☽ DUNKEL</button>'
     + '</div></div>'
 
     + '<div class="pnl"><div class="phd"><span class="phd-t">Sponsor-Banner (oben)</span></div>'
@@ -2008,7 +2008,123 @@ SCKR.fahrtenbuch.render.live = function() {
   if(t.trackPoints && t.trackPoints.length > 1) {
     setTimeout(function(){ SCKR.fahrtenbuch.render.showMap("detail-map", t.trackPoints, t.infraEvents||[]); }, 150);
   }
+}
+
+SCKR.fahrtenbuch.render.trips = function() {
+  var el = document.getElementById("trips");
+  if(!el) return;
+  var st = SCKR.fahrtenbuch.state;
+  var esc = SCKR.core.fmt.esc;
+  var trips = st.trips.filter(function(t) {
+    if(st.filterYear && st.filterYear !== "all" && (!t.date || t.date.slice(0,4) !== st.filterYear)) return false;
+    return true;
+  });
+  var years = [];
+  st.trips.forEach(function(t) { var y=t.date?t.date.slice(0,4):null; if(y && years.indexOf(y)===-1) years.push(y); });
+  years.sort().reverse();
+
+  var html = '<div class="shead"><div><div class="lxs">'+trips.length+' Eintraege</div><h2>Fahrten</h2></div>'
+    + '<button type="button" class="btn-sm" onclick="SCKR.fahrtenbuch.openNewTrip()" style="padding:8px 14px;border-radius:6px;background:var(--acc);color:#fff;border:none;font-family:var(--fd);font-size:13px;font-weight:800;cursor:pointer">+ NEU</button></div>';
+
+  if(years.length > 1) {
+    html += '<div class="season-pick">';
+    html += '<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="all" class="'+(st.filterYear==="all"||!st.filterYear?"active":"")+'">ALLE</button>';
+    years.forEach(function(y) {
+      html += '<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="'+y+'" class="'+(st.filterYear===y?"active":"")+'">'+y+'</button>';
+    });
+    html += '</div>';
+  }
+
+  if(trips.length === 0) {
+    html += '<div class="pnl" style="padding:32px;text-align:center"><div style="font-size:14px;color:var(--mut)">Noch keine Fahrten aufgezeichnet.</div>'
+      + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.openNewTrip()" style="margin-top:16px">ERSTE FAHRT EINTRAGEN</button></div>';
+  } else {
+    trips.forEach(function(t) {
+      var pts = Math.round(SCKR.fahrtenbuch.points.trip(t));
+      var mergeFlag = t._mergeFlag ? '<span style="font-family:var(--fd);font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(230,126,34,.2);color:var(--orange);margin-left:6px">'+t._mergeFlag.toUpperCase()+'</span>' : "";
+      html += '<button type="button" class="trip-card" onclick="SCKR.fahrtenbuch.openDetail(this.dataset.tid)" data-tid="'+t.id+'">'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
+        + '<div style="font-family:var(--fd);font-size:17px;font-weight:800;color:var(--wh)">'+esc(t.date||"")+mergeFlag+'</div>'
+        + '<div style="font-family:var(--fd);font-size:14px;font-weight:800;color:var(--acc);background:rgba(200,16,46,.08);padding:2px 8px;border-radius:4px">'+pts+' Pkt</div></div>'
+        + '<div style="font-size:13px;color:var(--off);margin-bottom:6px">'+esc(t.description||t.route||"")+'</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        + '<span class="chip">'+esc(t.category||"")+'</span>'
+        + '<span class="chip">'+(t.km||0).toFixed(2)+' km</span>'
+        + (t.boat?'<span class="chip">'+esc(t.boat)+'</span>':'')
+        + (t.isTracked?'<span class="chip gps">GPS</span>':'')
+        + (t._source==="regatta"?'<span class="chip" style="color:var(--acc)">Regatta</span>':'')
+        + '</div></button>';
+    });
+  }
+  el.innerHTML = html;
 };
+
+SCKR.fahrtenbuch.setFilterYear = function(y) {
+  SCKR.fahrtenbuch.state.filterYear = y||"all";
+  SCKR.fahrtenbuch.render.trips();
+};
+
+SCKR.fahrtenbuch.render.stats = function() {
+  var el = document.getElementById("stats");
+  if(!el) return;
+  var st = SCKR.fahrtenbuch.state;
+  var trips = st.trips.filter(function(t){ return !st.filterYear||st.filterYear==="all"||(t.date&&t.date.slice(0,4)===st.filterYear); });
+  var totalPts = trips.reduce(function(s,t){return s+Math.round(SCKR.fahrtenbuch.points.trip(t));},0);
+  var totalKm  = trips.reduce(function(s,t){return s+(t.km||0);},0);
+  var segelKm  = trips.reduce(function(s,t){return s+(t.segelKm||t.sailKm||0);},0);
+  var motorKm  = trips.reduce(function(s,t){return s+(t.motorKm||0);},0);
+  var years=[];
+  st.trips.forEach(function(t){var y=t.date?t.date.slice(0,4):null;if(y&&years.indexOf(y)===-1)years.push(y);});
+  years.sort().reverse();
+
+  var html = '<div class="shead"><div><div class="lxs">BSV Fahrtenwettbewerb</div><h2>Saisonpunkte</h2></div></div>';
+  html += '<div class="pnl"><div class="pts-box"><div style="font-family:var(--fd);font-size:56px;font-weight:900;color:var(--acc);font-variant-numeric:tabular-nums;line-height:1">'+totalPts+'<span style="font-size:20px;color:var(--mut);margin-left:6px">Pkt</span></div>'
+    + '<div style="font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--fd);letter-spacing:.08em">'+trips.length+' FAHRTEN &mdash; '+(st.filterYear==="all"||!st.filterYear?"GESAMT":st.filterYear)+'</div></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--bdr2)">'
+    + '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+totalKm.toFixed(0)+'<span style="font-size:11px;color:var(--mut)"> km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">GESAMT</div></div>'
+    + '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+segelKm.toFixed(0)+'<span style="font-size:11px;color:var(--mut)"> km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">SEGEL</div></div>'
+    + '<div style="padding:14px 8px;text-align:center"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+motorKm.toFixed(0)+'<span style="font-size:11px;color:var(--mut)"> km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">MOTOR</div></div>'
+    + '</div></div>';
+
+  if(years.length>0){
+    html+='<div class="season-pick"><button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="all" class="'+(st.filterYear==="all"||!st.filterYear?"active":"")+'">ALLE</button>';
+    years.forEach(function(y){html+='<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="'+y+'" class="'+(st.filterYear===y?"active":"")+'">'+y+'</button>';});
+    html+='</div>';
+  }
+  html += '<button type="button" class="btn btn-gold" onclick="SCKR.fahrtenbuch.exportExcel()" style="margin-top:10px">BSV EXCEL EXPORTIEREN</button>';
+  el.innerHTML = html;
+};
+
+SCKR.fahrtenbuch.render.settings = function() {
+  var el = document.getElementById("settings");
+  if(!el) return;
+  var st = SCKR.fahrtenbuch.state;
+  var esc = SCKR.core.fmt.esc;
+  var html = '<div class="shead"><div><div class="lxs">SCKR Kruepelsee</div><h2>Profil &amp; Boote</h2></div></div>';
+  var boats = SCKR.core.boats ? SCKR.core.boats.list() : (st.boats||[]);
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Meine Boote</span></div>';
+  if(!boats.length) {
+    html += '<div style="padding:20px;text-align:center;font-size:13px;color:var(--mut)">Noch kein Boot angelegt.</div>';
+  } else {
+    boats.forEach(function(b) {
+      var isA = SCKR.core.boats&&SCKR.core.boats.active()&&SCKR.core.boats.active().id===b.id;
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--bdr2)">'
+        + '<div><div style="font-weight:600;font-size:14px;color:var(--wh)">'+esc(b.name||b.boat||"")+'</div>'
+        + '<div style="font-size:11px;color:var(--mut)">'+esc(b.klasse||b.type||"")+(b.sailNumber?" &mdash; "+esc(b.sailNumber):"")+'</div></div>'
+        + (isA?'<span style="font-family:var(--fd);font-size:10px;font-weight:800;padding:3px 8px;border-radius:4px;background:rgba(26,138,80,.15);color:#4ecf88">AKTIV</span>'
+            :'<button type="button" data-bid="'+b.id+'" onclick="SCKR.fahrtenbuch.setActiveBoat(this.dataset.bid)" style="font-family:var(--fd);font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;border:1px solid var(--bdr);background:transparent;color:var(--mut);cursor:pointer">SETZEN</button>')
+        + '</div>';
+    });
+  }
+  html += '<div style="padding:12px 14px"><button type="button" class="btn btn-ghost" onclick="SCKR.fahrtenbuch.openBoatEditor()" style="padding:10px;font-size:13px">+ BOOT HINZUFUEGEN</button></div></div>';
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Backup &amp; Export</span></div>'
+    + '<div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">'
+    + '<button type="button" class="btn btn-ghost" onclick="SCKR.fahrtenbuch.exportJSON()" style="padding:11px;font-size:13px">JSON BACKUP ERSTELLEN</button>'
+    + '<label><input type="file" accept=".json" onchange="SCKR.fahrtenbuch.importJSON(this)" style="display:none"><button type="button" class="btn btn-ghost" style="width:100%;padding:11px;font-size:13px" onclick="this.previousElementSibling.click()">JSON BACKUP IMPORTIEREN</button></label>'
+    + '</div></div>';
+  el.innerHTML = html;
+};
+;
 
 SCKR.fahrtenbuch.updatePtsPreview = function() {
   var el = document.getElementById("dt-pts-preview");
