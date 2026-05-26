@@ -1192,12 +1192,18 @@ SCKR.fahrtenbuch.points = {
   // Direkter Weg (Luftlinie) fuer BSV-Punkte
   // Bei GPS-Fahrten: Haversine Start->Ende statt GPS-Gesamtstrecke
   directKm: function(t) {
+    // GPS-Fahrt: Luftlinie Start → Ende (Direktweg für BSV-Punkte)
     if(t.trackPoints && t.trackPoints.length >= 2) {
       var pts = t.trackPoints;
-      return SCKR.core.util.haversine(pts[0], pts[pts.length-1]);
+      var d = SCKR.core.util.haversine(pts[0], pts[pts.length-1]);
+      // Plausibilitäts-Check: Luftlinie darf nicht 0 sein wenn GPS-Track da ist
+      if(d > 0.01) return d;
     }
-    // Manuelle Eingabe: sailKm + sailSm direkt (User hat Direktweg eingetragen)
-    return (t.sailKm||0) + (t.sailSm||0)*1.852;
+    // Fallback: segelKm (GPS-akkumuliert) oder sailKm (manuell/sm-Umrechnung)
+    // segelKm = tatsächlich gesegelte km aus State
+    // sailKm  = km-Eintrag, sailSm = sm-Eintrag
+    var km = (t.segelKm||0) || (t.sailKm||0) || (t.sailSm||0)*1.852;
+    return km;
   },
   sail:    function(t) { return SCKR.fahrtenbuch.points.directKm(t); },
   motor:   function(t) { return 0.2*((t.motorKm||0) + (t.motorSm||0)*1.852); },
@@ -1497,6 +1503,7 @@ SCKR.fahrtenbuch.startTracking = async function(prefill) {
   var trip = SCKR.fahrtenbuch.newTrip(prefill);
   trip.startTime = new Date().toISOString();
   trip.isTracked = true;
+  trip.geoAutoStart = !!st.geoAutoStarted;  // merken ob Geofence-Start
   st.activeTrip = trip;
   st.trackPts = [];
   st.infraEvs = [];
@@ -1684,25 +1691,15 @@ SCKR.fahrtenbuch.stopTracking = async function() {
     st.activeTrip.motorSm = Math.round(motorKm/1.852*100)/100;
   }
 
-  // Save new stat fields from state
-  st.activeTrip.avgSpeed  = Math.round((st.avgSpeed||0)*10)/10;
-  st.activeTrip.pauseMs   = st.totalPauseMs||0;
-  st.activeTrip.segelMs   = st.segelMs||0;
-  st.activeTrip.motorMs   = st.motorMs||0;
-  st.activeTrip.anchorEvents = st.anchorEvents||[];
-  // km from segments already set above (sailKm/motorKm)
-  // but also save as segelKm for compatibility
-  st.activeTrip.segelKm   = st.activeTrip.sailKm||0;
-  st.activeTrip.motorKmGps = st.activeTrip.motorKm||0;
-
-  // Save segment data to trip before reset
-  st.activeTrip.segelKm   = st.segelKm||0;
-  st.activeTrip.motorKm   = st.motorKm||0;
-  st.activeTrip.segelMs   = st.segelMs||0;
-  st.activeTrip.motorMs   = st.motorMs||0;
-  st.activeTrip.avgSpeed  = Math.round((st.avgSpeed||0)*10)/10;
-  st.activeTrip.maxSpeed  = st.maxSpeed||0;
-  st.activeTrip.pauseMs   = st.totalPauseMs||0;
+  // State-Felder sauber einmalig setzen
+  st.activeTrip.segelKm      = Math.round((st.segelKm||0)*100)/100;
+  st.activeTrip.motorKm      = Math.round((st.motorKm||0)*100)/100;
+  st.activeTrip.sailKm       = st.activeTrip.segelKm;   // Kompatibilität
+  st.activeTrip.segelMs      = st.segelMs||0;
+  st.activeTrip.motorMs      = st.motorMs||0;
+  st.activeTrip.avgSpeed     = Math.round((st.avgSpeed||0)*10)/10;
+  st.activeTrip.maxSpeed     = st.maxSpeed||0;
+  st.activeTrip.pauseMs      = st.totalPauseMs||0;
   st.activeTrip.anchorEvents = st.anchorEvents||[];
 
   st.tracking = false;
@@ -1710,10 +1707,12 @@ SCKR.fahrtenbuch.stopTracking = async function() {
   st.activeTrip = null;
   st.currentSegment = null;
 
-  // Fahrten ohne Punkte nicht speichern
+  // 0-Punkte nur bei Geofence-Auto-Start verwerfen (könnte Fehlstart sein)
   var earnedPts = Math.round(SCKR.fahrtenbuch.points.trip(saved));
-  if(earnedPts <= 0) {
-    SCKR.core.ui.toast("FAHRT NICHT GESPEICHERT (0 PUNKTE)");
+  if(earnedPts <= 0 && saved.geoAutoStart) {
+    SCKR.core.ui.toast("GEOFENCE-FAHRT VERWORFEN — 0 PUNKTE (Fehlstart?)");
+    SCKR.fahrtenbuch.state.geoAutoStarted = false;
+    SCKR.fahrtenbuch.state._geoStartAsked = false;
     SCKR.fahrtenbuch.render.live();
     return;
   }
