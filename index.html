@@ -1192,18 +1192,10 @@ SCKR.fahrtenbuch.points = {
   // Direkter Weg (Luftlinie) fuer BSV-Punkte
   // Bei GPS-Fahrten: Haversine Start->Ende statt GPS-Gesamtstrecke
   directKm: function(t) {
-    // GPS-Fahrt: Luftlinie Start → Ende (Direktweg für BSV-Punkte)
-    if(t.trackPoints && t.trackPoints.length >= 2) {
-      var pts = t.trackPoints;
-      var d = SCKR.core.util.haversine(pts[0], pts[pts.length-1]);
-      // Plausibilitäts-Check: Luftlinie darf nicht 0 sein wenn GPS-Track da ist
-      if(d > 0.01) return d;
-    }
-    // Fallback: segelKm (GPS-akkumuliert) oder sailKm (manuell/sm-Umrechnung)
-    // segelKm = tatsächlich gesegelte km aus State
-    // sailKm  = km-Eintrag, sailSm = sm-Eintrag
-    var km = (t.segelKm||0) || (t.sailKm||0) || (t.sailSm||0)*1.852;
-    return km;
+    // BSV-Direktweg: GPS-gesegelte km (segelKm aus State)
+    // Rundkurse zählen vollständig — "direkt" = keine Zick-Zack-Aufblähung
+    // Priorität: segelKm (GPS) > sailKm (manuell km) > sailSm×1.852 (manuell sm)
+    return (t.segelKm||0) || (t.sailKm||0) || (t.sailSm||0)*1.852;
   },
   sail:    function(t) { return SCKR.fahrtenbuch.points.directKm(t); },
   motor:   function(t) { return 0.2*((t.motorKm||0) + (t.motorSm||0)*1.852); },
