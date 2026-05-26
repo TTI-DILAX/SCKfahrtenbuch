@@ -676,14 +676,34 @@ SCKR.admin.isUnlocked = function() { return SCKR.admin.state.unlocked; };
 
 SCKR.admin.showLogin = function() {
   if(SCKR.admin.state.unlocked) { SCKR.admin.openPanel(); return; }
-  var pwd = prompt("Admin-Passwort:");
-  if(!pwd) return;
+  // iOS Standalone: prompt() funktioniert nicht → eigenes Sheet
+  var html = '<div class="sheet-hd"><h3>ADMIN-ZUGANG</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>'
+    + '<div style="padding:20px 14px">'
+    + '<div class="fld"><label class="lbl">Passwort</label>'
+    + '<input class="inp" id="admin-pw-inp" type="password" placeholder="Passwort eingeben" autocomplete="current-password">'
+    + '</div>'
+    + '<button type="button" class="btn btn-red" style="margin-top:8px" onclick="SCKR.admin.checkLogin()">'
+    + 'ENTSPERREN</button>'
+    + '</div>';
+  SCKR.core.ui.openSheet(html);
+  setTimeout(function(){ var i=document.getElementById("admin-pw-inp"); if(i) i.focus(); }, 300);
+};
+
+SCKR.admin.checkLogin = function() {
+  var inp = document.getElementById("admin-pw-inp");
+  if(!inp) return;
+  var pwd = inp.value;
   if(pwd === SCKR.config.adminPassword) {
     SCKR.admin.state.unlocked = true;
+    SCKR.core.ui.closeSheet();
     SCKR.core.ui.toast("ADMIN ENTSPERRT");
-    SCKR.admin.openPanel();
+    setTimeout(function(){ SCKR.admin.openPanel(); }, 200);
   } else {
-    SCKR.core.ui.toast("FALSCHES PASSWORT");
+    inp.value = "";
+    inp.placeholder = "Falsches Passwort — nochmal";
+    inp.style.borderColor = "var(--acc)";
+    inp.focus();
   }
 };
 
@@ -2569,9 +2589,25 @@ SCKR.fahrtenbuch.render.settings = function() {
         + '<div style="font-size:11px;color:var(--mut)">'+esc(b.klasse||b.type||"")+(b.sailNumber?" &mdash; "+esc(b.sailNumber):"")+'</div></div>'
         + (isA?'<span style="font-family:var(--fd);font-size:10px;font-weight:800;padding:3px 8px;border-radius:4px;background:rgba(26,138,80,.15);color:#4ecf88">AKTIV</span>'
             :'<button type="button" data-bid="'+b.id+'" onclick="SCKR.fahrtenbuch.setActiveBoat(this.dataset.bid)" style="font-family:var(--fd);font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;border:1px solid var(--bdr);background:transparent;color:var(--mut);cursor:pointer">SETZEN</button>')
+        + '<button type="button" data-bid="'+b.id+'" onclick="SCKR.fahrtenbuch.openBoatEditor(this.dataset.bid)" class="btn btn-ghost" style="width:100%;font-size:12px;padding:8px;margin-top:6px">&#9998; BOOT BEARBEITEN</button>'
         + '</div>';
     });
   }
+  // Cloud-Sync Bereich (offen für alle Nutzer)
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Datensicherung</span></div>';
+  var lastB = st.profile.lastBackup ? new Date(st.profile.lastBackup) : null;
+  var lastBStr = lastB ? lastB.toLocaleDateString("de-DE")+" "+lastB.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "Noch kein Backup";
+  html += '<div style="padding:10px 14px 6px;font-size:11px;color:var(--mut)">Letztes Backup: <strong style="color:var(--wh)">'+lastBStr+'</strong></div>';
+  if(st.profile.cloudApiKey) {
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 14px 14px">'
+      + '<button type="button" class="btn btn-ghost" style="font-size:12px;padding:10px" onclick="SCKR.fahrtenbuch.cloud.sync(false)">&#9729; CLOUD SYNC</button>'
+      + '<button type="button" class="btn btn-ghost" style="font-size:12px;padding:10px" onclick="SCKR.fahrtenbuch.cloud.load()">&#8659; AUS CLOUD</button>'
+      + '</div>';
+  } else {
+    html += '<div style="padding:4px 14px 14px;font-size:11px;color:var(--mut)">Cloud-Backup: Admin-Bereich → API-Key hinterlegen</div>';
+  }
+  html += '</div>';
+
   // Einheiten-Toggle
   var u = st.profile.unitSystem||"auto";
   html += '<div class="pnl"><div class="phd"><span class="phd-t">Einheiten</span></div>'
