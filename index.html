@@ -289,8 +289,8 @@ svg.track{width:100%;height:180px;display:block}
 .prog{height:4px;background:rgba(255,255,255,.08);border-radius:100px;overflow:hidden;margin:16px 0 7px}
 .prog-bar{height:100%;background:linear-gradient(90deg,var(--club-second),var(--acc));transition:width .6s;box-shadow:0 0 8px rgba(200,168,75,.5)}
 .badge{display:inline-flex;padding:5px 12px;border-radius:4px;font-family:var(--fd);font-size:13px;font-weight:700;letter-spacing:.06em;background:rgba(200,16,46,.08);color:var(--acc);border:1px solid var(--bdr)}
-.season-pick{display:flex;gap:4px;margin-bottom:14px;background:rgba(6,24,40,.8);border:1px solid var(--bdr2);border-radius:var(--r);padding:3px}
-.season-pick button{flex:1;padding:7px;border:none;background:var(--bg3);border-radius:6px;cursor:pointer;font-family:var(--fd);font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--mut)}
+.season-pick{display:flex;gap:4px;margin-bottom:14px;background:var(--bg3);border:1px solid var(--bdr2);border-radius:var(--r);padding:3px}
+.season-pick button{flex:1;padding:7px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-family:var(--fd);font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--text2)}
 .season-pick button.active{background:rgba(200,16,46,.08);color:var(--acc);border:1px solid var(--bdr)}
 
 /* SHEET */
@@ -2439,29 +2439,30 @@ SCKR.fahrtenbuch.render.stats = function() {
     return !st.filterYear||st.filterYear==="all"||(t.date&&t.date.slice(0,4)===st.filterYear);
   });
 
-  // ── Aggregierte Kennzahlen ──────────────────────────────
-  var totalPts  = trips.reduce(function(s,t){return s+Math.round(P.trip(t));},0);
-  var segelKm   = trips.reduce(function(s,t){return s+(t.segelKm||t.sailKm||0);},0);
-  var motorKm   = trips.reduce(function(s,t){return s+(t.motorKm||0);},0);
-  var totalKm   = segelKm + motorKm;
-  var bridges   = trips.reduce(function(s,t){return s+(t.bridges||0);},0);
-  var locks     = trips.reduce(function(s,t){return s+(t.locks||0);},0);
-  var years=[]; allTrips.forEach(function(t){var y=t.date?t.date.slice(0,4):null;if(y&&years.indexOf(y)===-1)years.push(y);});
+  var totalPts = trips.reduce(function(s,t){return s+Math.round(P.trip(t));},0);
+  var segelKm  = trips.reduce(function(s,t){return s+(t.segelKm||t.sailKm||0);},0);
+  var motorKm  = trips.reduce(function(s,t){return s+(t.motorKm||0);},0);
+  var totalKm  = segelKm + motorKm;
+  var bridges  = trips.reduce(function(s,t){return s+(t.bridges||0);},0);
+  var locks    = trips.reduce(function(s,t){return s+(t.locks||0);},0);
+
+  var years = [];
+  allTrips.forEach(function(t){
+    var y = t.date ? t.date.slice(0,4) : null;
+    if(y && years.indexOf(y)===-1) years.push(y);
+  });
   years.sort().reverse();
 
-  // ── Punkte nach Monat (für Chart) ───────────────────────
-  var monthNames = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+  var monthNames = ["Jan","Feb","M\u00e4r","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   var byMonth = {};
-  trips.forEach(function(t) {
+  trips.forEach(function(t){
     if(!t.date) return;
     var m = parseInt(t.date.slice(5,7))-1;
     byMonth[m] = (byMonth[m]||0) + Math.round(P.trip(t));
   });
-  // Max für Skalierung
   var maxPts = 1;
-  for(var mi=0;mi<12;mi++) if((byMonth[mi]||0) > maxPts) maxPts = byMonth[mi];
+  for(var mi=0;mi<12;mi++) if((byMonth[mi]||0)>maxPts) maxPts=byMonth[mi];
 
-  // ── Punkte-Aufschlüsselung ───────────────────────────────
   var ptSegel  = trips.reduce(function(s,t){return s+Math.round(P.sail(t));},0);
   var ptMotor  = trips.reduce(function(s,t){return s+Math.round(P.motor(t));},0);
   var ptBridge = trips.reduce(function(s,t){return s+P.bridge(t);},0);
@@ -2469,113 +2470,140 @@ SCKR.fahrtenbuch.render.stats = function() {
   var ptFern   = trips.reduce(function(s,t){return s+P.fern(t);},0);
   var ptExtra  = trips.reduce(function(s,t){return s+P.trailer(t)+P.comm(t)+P.regFn(t);},0);
 
-  // ── HTML aufbauen ────────────────────────────────────────
   var html = '<div class="shead"><div><div class="lxs">BSV Fahrtenwettbewerb</div><h2>Saisonpunkte</h2></div></div>';
 
-  // Jahres-Filter
-  if(years.length>0){
-    html+='<div class="season-pick"><button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="all" class="'+(st.filterYear==="all"||!st.filterYear?"active":"")+'" >ALLE</button>';
-    years.forEach(function(y){html+='<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="'+y+'" class="'+(st.filterYear===y?"active":"")+'" >'+y+'</button>';});
-    html+='</div>';
+  // ── Jahres-Filter ────────────────────────────────────────
+  if(years.length > 0) {
+    html += '<div class="season-pick">';
+    html += '<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="all"'
+      + ' class="'+((!st.filterYear||st.filterYear==="all")?"active":"")+'">'
+      + 'ALLE</button>';
+    years.forEach(function(y){
+      html += '<button type="button" onclick="SCKR.fahrtenbuch.setFilterYear(this.dataset.y)" data-y="'+y+'"'
+        + ' class="'+(st.filterYear===y?"active":"")+'">'
+        + y+'</button>';
+    });
+    html += '</div>';
   }
 
-  // Haupt-Punkte-Box
-  html += '<div class="pnl"><div class="pts-box">'
-    + '<div style="font-family:var(--fd);font-size:60px;font-weight:900;color:var(--acc);font-variant-numeric:tabular-nums;line-height:1">'+totalPts
-    + '<span style="font-size:20px;color:var(--mut);margin-left:6px">Pkt</span></div>'
-    + '<div style="font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--fd);letter-spacing:.08em">'+trips.length+' FAHRTEN &mdash; '+(st.filterYear==="all"||!st.filterYear?"GESAMT":st.filterYear)+'</div>'
-    + '</div>'
-    // Kennzahlen-Grid
+  // ── Haupt-Punkte-Box ─────────────────────────────────────
+  // Hintergrund: immer var(--bg2), KEINE hardcoded dunkle Farbe
+  html += '<div class="pnl" style="overflow:hidden">'
+    + '<div style="padding:24px 16px 20px;text-align:center;background:var(--bg2)">'
+    + '<div style="font-family:var(--fd);font-size:64px;font-weight:900;color:var(--acc);font-variant-numeric:tabular-nums;line-height:1">'
+    + totalPts
+    + '<span style="font-size:22px;color:var(--mut);margin-left:8px">Pkt</span></div>'
+    + '<div style="font-size:11px;color:var(--mut);margin-top:6px;font-family:var(--fd);letter-spacing:.1em">'
+    + trips.length+' FAHRTEN \u2014 '+((!st.filterYear||st.filterYear==="all")?"GESAMT":st.filterYear)
+    + '</div></div>'
+    // Kennzahlen-Grid — explizite Farbe damit hell+dunkel beide funktionieren
     + '<div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--bdr2)">'
-    + '<div style="padding:12px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+totalKm.toFixed(0)+'<span style="font-size:10px;color:var(--mut)"> km</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:2px">GESAMT</div></div>'
-    + '<div style="padding:12px 8px;text-align:center;border-right:1px solid var(--bdr2)"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+bridges+'<span style="font-size:10px;color:var(--mut)"> St</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:2px">BRÜCKEN</div></div>'
-    + '<div style="padding:12px 8px;text-align:center"><div style="font-family:var(--fd);font-size:22px;font-weight:900;color:var(--wh)">'+locks+'<span style="font-size:10px;color:var(--mut)"> St</span></div><div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:2px">SCHLEUSEN</div></div>'
+    + '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)">'
+    + '<div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--text)">'+totalKm.toFixed(0)
+    + '<span style="font-size:11px;font-weight:600;color:var(--mut)"> km</span></div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">GESAMT</div></div>'
+    + '<div style="padding:14px 8px;text-align:center;border-right:1px solid var(--bdr2)">'
+    + '<div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--text)">'+bridges
+    + '<span style="font-size:11px;font-weight:600;color:var(--mut)"> St</span></div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">BR\u00dcCKEN</div></div>'
+    + '<div style="padding:14px 8px;text-align:center">'
+    + '<div style="font-family:var(--fd);font-size:24px;font-weight:900;color:var(--text)">'+locks
+    + '<span style="font-size:11px;font-weight:600;color:var(--mut)"> St</span></div>'
+    + '<div style="font-family:var(--fd);font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:3px">SCHLEUSEN</div></div>'
     + '</div></div>';
 
-  // ── CHART 1: Punkte nach Monat ───────────────────────────
+  // ── CHART: Punkte pro Monat ───────────────────────────────
   if(trips.length > 0) {
-    var cW = 320, cH = 100, padL = 8, padR = 8, padB = 22, padT = 8;
-    var barW = (cW - padL - padR) / 12;
-    var chartBars = "";
-    var chartLabels = "";
-    for(var mi2=0; mi2<12; mi2++) {
-      var pts = byMonth[mi2]||0;
-      var barH = pts > 0 ? Math.max(4, ((pts/maxPts) * (cH-padT-padB))) : 0;
+    // Monatsbezeichnungen immer in --text2, Balken in --acc, leere Slots in --bg3
+    var cW=320, cH=120, padL=4, padR=4, padB=28, padT=12;
+    var barW = (cW-padL-padR)/12;
+    var bars="", labels="";
+    for(var mi2=0;mi2<12;mi2++){
+      var mpts = byMonth[mi2]||0;
+      var barH = mpts>0 ? Math.max(6,((mpts/maxPts)*(cH-padT-padB))) : 0;
       var x = padL + mi2*barW;
-      var hasData = pts > 0;
-      chartBars += '<rect x="'+(x+1).toFixed(1)+'" y="'+(cH-padB-barH).toFixed(1)+'"'
-        + ' width="'+(barW-2).toFixed(1)+'" height="'+barH.toFixed(1)+'"'
-        + ' rx="2" fill="'+(hasData?"var(--acc)":"rgba(255,255,255,.04)")+'" />';
-      if(hasData) {
-        chartBars += '<text x="'+(x+barW/2).toFixed(1)+'" y="'+(cH-padB-barH-3).toFixed(1)+'"'
-          + ' text-anchor="middle" font-size="7" fill="var(--acc)" font-family="Barlow Condensed,sans-serif" font-weight="700">'+pts+'</text>';
-      }
-      chartLabels += '<text x="'+(x+barW/2).toFixed(1)+'" y="'+(cH-4)+'"'
-        + ' text-anchor="middle" font-size="7" fill="rgba(255,255,255,.35)" font-family="Barlow Condensed,sans-serif">'+monthNames[mi2]+'</text>';
+      // Balken — Leer-Slots dezent, Daten-Balken in Akzentfarbe
+      bars += '<rect x="'+(x+1.5).toFixed(1)+'" y="'+(cH-padB-barH).toFixed(1)+'"'
+        +' width="'+(barW-3).toFixed(1)+'" height="'+Math.max(barH,0).toFixed(1)+'"'
+        +' rx="2" fill="'+(mpts>0?"var(--acc)":"var(--bg3)")+'" />';
+      // Wert über dem Balken
+      if(mpts>0) bars += '<text x="'+(x+barW/2).toFixed(1)+'" y="'+(cH-padB-barH-4).toFixed(1)+'"'
+        +' text-anchor="middle" font-size="8" fill="var(--acc)" font-family="Barlow Condensed,sans-serif" font-weight="800">'+mpts+'</text>';
+      // Monatsname — immer var(--text2) damit hell+dunkel lesbar
+      labels += '<text x="'+(x+barW/2).toFixed(1)+'" y="'+(cH-6)+'"'
+        +' text-anchor="middle" font-size="8" fill="var(--text2)" font-family="Barlow Condensed,sans-serif">'+monthNames[mi2]+'</text>';
     }
     html += '<div class="pnl"><div class="phd"><span class="phd-t">Punkte pro Monat</span></div>'
-      + '<div style="padding:10px 14px 6px;overflow:hidden">'
-      + '<svg viewBox="0 0 '+cW+' '+cH+'" style="width:100%;height:auto;display:block">'
-      + '<line x1="'+padL+'" y1="'+(cH-padB)+'" x2="'+(cW-padR)+'" y2="'+(cH-padB)+'" stroke="rgba(255,255,255,.08)" stroke-width="1"/>'
-      + chartBars + chartLabels
-      + '</svg></div></div>';
+      +'<div style="padding:10px 14px 8px">'
+      +'<svg viewBox="0 0 '+cW+' '+cH+'" style="width:100%;height:auto;display:block;overflow:visible">'
+      +'<line x1="'+padL+'" y1="'+(cH-padB)+'" x2="'+(cW-padR)+'" y2="'+(cH-padB)+'" stroke="var(--bdr2)" stroke-width="1"/>'
+      + bars + labels
+      +'</svg></div></div>';
   }
 
-  // ── CHART 2: Segel/Motor + Punkte-Aufschlüsselung ───────
-  if(trips.length > 0) {
-    var totalKmNZ = totalKm || 1;
-    var segelPct = (segelKm/totalKmNZ*100);
-    var motorPct = (motorKm/totalKmNZ*100);
+  // ── Antrieb & Strecke ─────────────────────────────────────
+  if(trips.length>0 && totalKm>0) {
+    var segelPct = segelKm/totalKm*100;
+    var motorPct = motorKm/totalKm*100;
     html += '<div class="pnl"><div class="phd"><span class="phd-t">Antrieb &amp; Strecke</span></div>'
-      + '<div style="padding:10px 14px">'
-      // Segel/Motor Split Bar
-      + '<div style="display:flex;height:20px;border-radius:6px;overflow:hidden;margin-bottom:8px">'
-      + '<div style="width:'+segelPct.toFixed(1)+'%;background:#1E6FBF;display:flex;align-items:center;justify-content:center">'
-      + (segelPct>12?'<span style="font-size:9px;font-family:var(--fd);font-weight:800;color:#fff">'+segelKm.toFixed(0)+' km</span>':'')
-      + '</div>'
-      + '<div style="flex:1;background:var(--acc);display:flex;align-items:center;justify-content:center">'
-      + (motorPct>8?'<span style="font-size:9px;font-family:var(--fd);font-weight:800;color:#fff">'+motorKm.toFixed(0)+' km</span>':'')
-      + '</div></div>'
-      + '<div style="display:flex;gap:16px;font-size:11px;font-family:var(--fd)">'
-      + '<span style="color:#1E6FBF">&#9632; SEGEL '+segelPct.toFixed(0)+'%</span>'
-      + '<span style="color:var(--acc)">&#9632; MOTOR '+motorPct.toFixed(0)+'%</span>'
-      + '</div>'
-      + '</div></div>';
-
-    // Punkte-Aufschlüsselung
-    var ptRows = [
-      {l:"Segel (Direktweg)", v:ptSegel, c:"#1E6FBF"},
-      {l:"Motor", v:ptMotor, c:"var(--acc)"},
-      {l:"Brücken ("+bridges+"x)", v:ptBridge, c:"#C8A84B"},
-      {l:"Schleusen ("+locks+"x)", v:ptLock, c:"#C8A84B"},
-      {l:"Fernfahrt", v:ptFern, c:"#4ecf88"},
-      {l:"Extras (Trailer/Gemeinschaft/Regatta)", v:ptExtra, c:"#9B59B6"},
-    ].filter(function(r){return r.v>0;});
-    var maxPt2 = Math.max.apply(null, ptRows.map(function(r){return r.v;})) || 1;
-
-    if(ptRows.length > 0) {
-      html += '<div class="pnl"><div class="phd"><span class="phd-t">Punkte nach Kategorie</span></div>'
-        + '<div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px">';
-      ptRows.forEach(function(row) {
-        var pct = (row.v/maxPt2*100);
-        html += '<div><div style="display:flex;justify-content:space-between;margin-bottom:3px">'
-          + '<span style="font-family:var(--fd);font-size:11px;color:var(--off)">'+row.l+'</span>'
-          + '<span style="font-family:var(--fd);font-size:12px;font-weight:900;color:var(--wh)">'+row.v+' Pkt</span>'
-          + '</div>'
-          + '<div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">'
-          + '<div style="width:'+pct.toFixed(1)+'%;height:100%;background:'+row.c+';border-radius:3px"></div>'
-          + '</div></div>';
-      });
-      html += '</div></div>';
-    }
+      +'<div style="padding:10px 14px 14px">'
+      // Split Bar
+      +'<div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:10px">'
+      +(segelKm>0?'<div style="width:'+segelPct.toFixed(1)+'%;background:#1E6FBF;display:flex;align-items:center;justify-content:center">'
+        +(segelPct>15?'<span style="font-size:10px;font-family:var(--fd);font-weight:800;color:#fff">'+segelKm.toFixed(1)+' km</span>':'')
+        +'</div>':'')
+      +(motorKm>0?'<div style="flex:1;background:var(--acc);display:flex;align-items:center;justify-content:center">'
+        +(motorPct>8?'<span style="font-size:10px;font-family:var(--fd);font-weight:800;color:#fff">'+motorKm.toFixed(1)+' km</span>':'')
+        +'</div>':'')
+      +'</div>'
+      // Legende — var(--text) für Lesbarkeit
+      +'<div style="display:flex;gap:16px">'
+      +(segelKm>0?'<div style="font-size:12px;font-family:var(--fd)">'
+        +'<span style="color:#1E6FBF;font-weight:800">\u25A0 SEGEL</span>'
+        +' <span style="color:var(--text)">'+segelPct.toFixed(0)+'% &middot; '+segelKm.toFixed(1)+' km</span></div>':'')
+      +(motorKm>0?'<div style="font-size:12px;font-family:var(--fd)">'
+        +'<span style="color:var(--acc);font-weight:800">\u25A0 MOTOR</span>'
+        +' <span style="color:var(--text)">'+motorPct.toFixed(0)+'% &middot; '+motorKm.toFixed(1)+' km</span></div>':'')
+      +'</div></div></div>';
   }
 
-  html += '<button type="button" class="btn btn-gold" onclick="SCKR.fahrtenbuch.exportExcel()" style="margin-top:10px">BSV EXCEL EXPORTIEREN</button>';
-  if(trips.length === 0) {
+  // ── Punkte-Aufschlüsselung ────────────────────────────────
+  var ptRows = [
+    {l:"Segel (GPS-Strecke)", v:ptSegel,  c:"#1E6FBF"},
+    {l:"Motor",               v:ptMotor,  c:"var(--acc)"},
+    {l:"Br\u00FCcken ("+bridges+"x)", v:ptBridge, c:"#C8A84B"},
+    {l:"Schleusen ("+locks+"x)",      v:ptLock,   c:"#C8A84B"},
+    {l:"Fernfahrt",           v:ptFern,   c:"#4ecf88"},
+    {l:"Extras",              v:ptExtra,  c:"#9B59B6"},
+  ].filter(function(r){return r.v>0;});
+
+  if(ptRows.length>0) {
+    var maxPt2 = Math.max.apply(null, ptRows.map(function(r){return r.v;})) || 1;
+    html += '<div class="pnl"><div class="phd"><span class="phd-t">Punkte nach Kategorie</span></div>'
+      +'<div style="padding:10px 14px 14px;display:flex;flex-direction:column;gap:10px">';
+    ptRows.forEach(function(row){
+      var pct = (row.v/maxPt2*100);
+      html += '<div>'
+        +'<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
+        +'<span style="font-family:var(--fd);font-size:12px;color:var(--text2)">'+row.l+'</span>'
+        +'<span style="font-family:var(--fd);font-size:13px;font-weight:900;color:var(--text)">'+row.v+' Pkt</span>'
+        +'</div>'
+        +'<div style="height:7px;background:var(--bg3);border-radius:4px;overflow:hidden">'
+        +'<div style="width:'+pct.toFixed(1)+'%;height:100%;background:'+row.c+';border-radius:4px"></div>'
+        +'</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  html += '<button type="button" class="btn btn-ghost" onclick="SCKR.fahrtenbuch.exportExcel()" style="margin-top:10px">BSV EXCEL EXPORTIEREN</button>';
+
+  if(trips.length===0) {
     html += '<div class="pnl"><div class="idle-msg">Noch keine Fahrten in diesem Zeitraum.</div></div>';
   }
+
   el.innerHTML = html;
-};;
+};
+
 
 SCKR.fahrtenbuch.render.settings = function() {
   var el = document.getElementById("settings");
