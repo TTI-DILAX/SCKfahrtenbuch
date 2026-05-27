@@ -38,19 +38,27 @@
    Header: Vereinsfarbe (--club-header)
    Akzent: --club-accent ueberall */
 [data-theme="light"] {
-  --bg:       #F6F6F6;
+  --bg:       #F2F2F2;
   --bg2:      #FFFFFF;
-  --bg3:      #EFEFEF;
+  --bg3:      #E8E8E8;
   --surface:  #FFFFFF;
   --acc:      var(--club-accent);
   --acc2:     var(--club-second);
+  --acc3:     #9B0B20;
   --nav:      var(--club-header);
-  --text:     #1a1a1a;
-  --text2:    #555555;
-  --mut:      #999999;
-  --bdr:      #E5E5E5;
-  --shadow:   0 1px 8px rgba(0,0,0,.07);
-  --shadow2:  0 4px 20px rgba(0,0,0,.12);
+  --text:     #111111;
+  --text2:    #444444;
+  --wh:       #111111;
+  --off:      #333333;
+  --mut:      #666666;
+  --bdr:      #D5D5D5;
+  --bdr2:     #C5C5C5;
+  --green:    #1a7a3a;
+  --orange:   #c45a00;
+  --red:      #C8102E;
+  --teal:     #0a7a72;
+  --shadow:   0 1px 8px rgba(0,0,0,.10);
+  --shadow2:  0 4px 20px rgba(0,0,0,.18);
 }
 
 /* ══ DUNKEL-MODUS ══
@@ -64,11 +72,19 @@
   --surface:  #1e1e1e;
   --acc:      var(--club-accent);
   --acc2:     var(--club-second);
+  --acc3:     #C8A84B;
   --nav:      var(--club-header);
   --text:     #F0F0F0;
   --text2:    #AAAAAA;
+  --wh:       #F0F0F0;
+  --off:      #CCCCCC;
   --mut:      #666666;
   --bdr:      rgba(255,255,255,.09);
+  --bdr2:     rgba(255,255,255,.14);
+  --green:    #4ecf88;
+  --orange:   #e67e22;
+  --red:      #C8102E;
+  --teal:     #1AABA0;
   --shadow:   0 2px 12px rgba(0,0,0,.5);
   --shadow2:  0 8px 32px rgba(0,0,0,.65);
 }
@@ -97,18 +113,17 @@ a{color:var(--acc2)}
 [data-theme="light"] body{background:#F4F6F9}
 [data-theme="light"] /* Tab colors handled by main .tab rule */
 [data-theme="light"] .prow .lv{color:#3a4a6a}
-[data-theme="light"] .trip-card:active{background:#f0f4ff}
-[data-theme="light"] .gauge-val,[data-theme="light"] .hero-num{color:var(--club-blue)}
-[data-theme="light"] .gauge-lbl,[data-theme="light"] .lxs{color:#7a8aaa}
-[data-theme="light"] .ship-title,[data-theme="light"] .hdr-text .title{color:#ffffff}
+[data-theme="light"] .trip-card:active{background:#E0E0E0}
+[data-theme="light"] .gauge-val,[data-theme="light"] .hero-num{color:var(--text)}
+[data-theme="light"] .gauge-lbl,[data-theme="light"] [data-theme="light"] .ship-title,[data-theme="light"] .hdr-text .title{color:#ffffff}
 [data-theme="light"] .hdr-text .club{color:rgba(255,255,255,.75)}
 [data-theme="light"] .sheet{box-shadow:0 -8px 40px rgba(0,0,0,.15)}
-[data-theme="light"] .btn-ghost{color:var(--club-blue);border-color:var(--club-blue)}
+[data-theme="light"] .btn-ghost{color:var(--acc);border-color:var(--acc);background:transparent}
 [data-theme="light"] .phd-t{color:var(--text2)}
 [data-theme="light"] select.inp option{background:#fff;color:#1a1a2e}
 [data-theme="light"] .empty{color:#9aaccc}
 [data-theme="light"] .warn{background:var(--bg3);border-left-color:var(--text2)}
-[data-theme="light"] .geo.watch{background:rgba(26,58,107,.08);color:var(--club-blue);border-color:rgba(26,58,107,.3)}
+[data-theme="light"] .geo.watch{background:rgba(200,16,46,.06);color:var(--acc);border-color:rgba(200,16,46,.2)}
 [data-theme="light"] .map-wrap{border-color:rgba(26,58,107,.2)}
 
 /* HEADER */
@@ -117,7 +132,7 @@ a{color:var(--acc2)}
 #hdr-logo{width:44px;height:44px;flex-shrink:0;border-radius:50%;cursor:pointer;border:1.5px solid var(--acc3);filter:drop-shadow(0 0 8px rgba(200,168,75,.35));display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--bg2)}
 #hdr-logo img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .hdr-text{flex:1;min-width:0}
-.hdr-text .club{font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(var(--club-nav-text,255,255,255),.7);line-height:1}
+.hdr-text .club{font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.7);line-height:1}
 .hdr-text .title{font-family:var(--fs);font-size:15px;font-weight:700;color:var(--nav-text,#fff);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hdr-badge{font-family:var(--fd);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--text2);background:rgba(200,168,75,.12);border:1px solid var(--bdr);border-radius:4px;padding:3px 9px;cursor:pointer}
 
@@ -136,7 +151,7 @@ a{color:var(--acc2)}
 .screen{padding:16px 14px calc(100px + env(safe-area-inset-bottom));display:none}
 .screen.active{display:block}
 .shead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--bdr2)}
-.shead h2{font-family:var(--fd);font-weight:800;font-size:26px}
+.shead h2{font-family:var(--fd);font-weight:800;font-size:26px;color:var(--wh)}
 .lxs{font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--acc3)}
 
 /* PANEL */
@@ -334,8 +349,8 @@ svg.track{width:100%;height:180px;display:block}
 [data-theme="light"] .lxs { color: var(--acc); }
 [data-theme="light"] .phd-t { color: var(--text2); }
 [data-theme="light"] .phd::before { background: var(--acc); }
-[data-theme="light"] .tab { color: rgba(var(--club-nav-text, 255,255,255),.45); }
-[data-theme="light"] .tab.active { color: var(--nav-text, #fff); border-top-color: var(--acc); }
+[data-theme="light"] .tab { color: rgba(255,255,255,.55); }
+[data-theme="light"] .tab.active { color: #ffffff; border-top-color: var(--acc); }
 [data-theme="light"] select.inp option { background: #fff; color: #1a1a1a; }
 [data-theme="light"] .btn-gold { background: var(--acc); color: #fff; box-shadow: 0 4px 16px rgba(200,16,46,.25); }
 [data-theme="light"] .btn-green { background: #16a34a; }
@@ -2584,24 +2599,26 @@ SCKR.fahrtenbuch.render.settings = function() {
         + '</div>';
     });
   }
-  // Cloud-Sync Bereich (offen für alle Nutzer)
-  html += '<div class="pnl"><div class="phd"><span class="phd-t">Datensicherung</span></div>';
+  // Cloud-Backup (offen, mit Anleitung + Key-Eingabe)
+  var hasKey = !!(st.profile.cloudApiKey);
   var lastB = st.profile.lastBackup ? new Date(st.profile.lastBackup) : null;
   var lastBStr = lastB ? lastB.toLocaleDateString("de-DE")+" "+lastB.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "Noch kein Backup";
-  html += '<div style="padding:10px 14px 6px;font-size:11px;color:var(--mut)">Letztes Backup: <strong style="color:var(--wh)">'+lastBStr+'</strong></div>';
-  if(st.profile.cloudApiKey) {
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 14px 14px">'
-      + '<button type="button" class="btn btn-ghost" style="font-size:12px;padding:10px" onclick="SCKR.fahrtenbuch.cloud.sync(false)">&#9729; CLOUD SYNC</button>'
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">&#9729; Cloud-Backup</span></div>';
+  html += '<div style="padding:10px 14px 4px;font-size:11px;color:var(--mut)">Letztes Backup: <strong style="color:var(--wh)">'+lastBStr+'</strong></div>';
+  if(hasKey) {
+    html += '<div style="padding:4px 14px 6px;font-size:12px;color:var(--green)">&#10003; Eingerichtet</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 14px 8px">'
+      + '<button type="button" class="btn btn-ghost" style="font-size:12px;padding:10px" onclick="SCKR.fahrtenbuch.cloud.sync(false)">&#9729; JETZT SYNC</button>'
       + '<button type="button" class="btn btn-ghost" style="font-size:12px;padding:10px" onclick="SCKR.fahrtenbuch.cloud.load()">&#8659; AUS CLOUD</button>'
-      + '</div>';
+      + '</div>'
+      + '<div style="padding:0 14px 12px"><button type="button" class="btn btn-ghost" style="font-size:11px;padding:6px 10px" onclick="SCKR.fahrtenbuch.showCloudSetup()">&#9881; Key ändern</button></div>';
   } else {
-    html += '<div style="padding:4px 14px 14px;font-size:11px;color:var(--mut)">Cloud-Backup: Admin-Bereich → API-Key hinterlegen</div>';
+    html += '<div style="padding:8px 14px;font-size:12px;color:var(--off);line-height:1.5">Sichere deine Fahrten automatisch in der Cloud — kostenlos, ohne Registrierung in dieser App.</div>'
+      + '<div style="padding:0 14px 14px"><button type="button" class="btn btn-red" style="font-size:13px;padding:10px" onclick="SCKR.fahrtenbuch.showCloudSetup()">CLOUD-BACKUP EINRICHTEN</button></div>';
   }
   html += '</div>';
 
-  // Einheiten-Toggle
-  var u = st.profile.unitSystem||"auto";
-  html += '<div class="pnl"><div class="phd"><span class="phd-t">Einheiten</span></div>'
+    html += '<div class="pnl"><div class="phd"><span class="phd-t">Einheiten</span></div>'
     + '<div class="trow" style="gap:6px;flex-wrap:wrap">'
     + '<button type="button" onclick="SCKR.fahrtenbuch.setUnitSystem(\'auto\')" class="btn '+(u==="auto"?"btn-red":"btn-ghost")+'" style="flex:1;padding:10px;font-size:12px">AUTO</button>'
     + '<button type="button" onclick="SCKR.fahrtenbuch.setUnitSystem(\'metric\')" class="btn '+(u==="metric"?"btn-red":"btn-ghost")+'" style="flex:1;padding:10px;font-size:12px">km/h · km</button>'
@@ -2676,6 +2693,50 @@ SCKR.fahrtenbuch.saveDetail = async function() {
 };
 
 /* ─── TRIP EDITOR SHEET ───────────────────────────────── */
+SCKR.fahrtenbuch.shareTrip = async function(tripId) {
+  var st = SCKR.fahrtenbuch.state;
+  var t = st.trips.find(function(x){return x.id===tripId;});
+  if(!t) return;
+  var P = SCKR.fahrtenbuch.points;
+  var pts = Math.round(P.trip(t));
+  var km  = (t.segelKm||t.sailKm||0).toFixed(2);
+  var mot = (t.motorKm||0).toFixed(2);
+  var dateStr = t.date ? new Date(t.date).toLocaleDateString("de-DE",{day:"2-digit",month:"long",year:"numeric"}) : (t.date||"");
+  var skipper = st.profile.name ? st.profile.name + " - " : "";
+  var nl = "\n";
+  var text = "Segelclub Kruepelsee - Fahrtenbuch" + nl
+    + skipper + dateStr + nl
+    + "Boot: " + (t.yachtName||"") + (t.sailNumber ? " (" + t.sailNumber + ")" : "") + nl
+    + "Strecke: " + km + " km" + (parseFloat(mot)>0 ? " + " + mot + " km Motor" : "") + nl
+    + "Punkte BSV: " + pts + " Pkt" + nl
+    + (t.description ? "Route: " + t.description + nl : "")
+    + (t.bridges ? "Bruecken: " + t.bridges + nl : "")
+    + (t.locks ? "Schleusen: " + t.locks + nl : "")
+    + nl + "Aufgezeichnet mit SCKR Fahrtenbuch";
+
+  var json = JSON.stringify({sckr_version:1, trips:[t]}, null, 2);
+  var blob = new Blob([json], {type:"application/json"});
+  var file = new File([blob], "fahrt-" + (t.date||"export") + ".json", {type:"application/json"});
+
+  if(navigator.share) {
+    try {
+      if(navigator.canShare && navigator.canShare({files:[file]})) {
+        await navigator.share({title:"SCKR Fahrt " + dateStr, text:text, files:[file]});
+      } else {
+        await navigator.share({title:"SCKR Fahrt " + dateStr, text:text});
+      }
+    } catch(e) {
+      if(e.name !== "AbortError") SCKR.core.ui.toast("TEILEN FEHLGESCHLAGEN");
+    }
+  } else {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "fahrt-" + (t.date||"export") + ".json";
+    a.click(); URL.revokeObjectURL(url);
+    SCKR.core.ui.toast("DATEI HERUNTERGELADEN");
+  }
+};
+
 SCKR.fahrtenbuch.openDetail = function(tripId) {
   var st = SCKR.fahrtenbuch.state;
   var t = null;
@@ -2696,7 +2757,8 @@ SCKR.fahrtenbuch.openDetail = function(tripId) {
   html += '<div class="pts-box"><div style="font-family:var(--fd);font-size:52px;font-weight:900;color:var(--acc);font-variant-numeric:tabular-nums" id="dt-pts-preview">'+pts+' <span style="font-size:20px;font-weight:600;color:var(--mut)">PKT</span></div>'
     + '<div style="font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--fd);letter-spacing:.06em">LIVE-VORSCHAU</div></div>';
 
-  html += '<div style="display:flex;gap:8px;margin-top:12px">'
+  html += '<button type="button" data-tid="'+t.id+'" class="btn btn-ghost" style="width:100%;margin-top:8px;padding:12px;font-size:13px" onclick="SCKR.fahrtenbuch.shareTrip(this.dataset.tid)">&#8679; FAHRT TEILEN (WhatsApp / Mail / ...)</button>';
+  html += '<div style="display:flex;gap:8px;margin-top:8px">'
     + '<button class="btn btn-red" type="button" onclick="SCKR.fahrtenbuch.saveDetail()" style="flex:2">SPEICHERN</button>'
     + '<button type="button" onclick="SCKR.fahrtenbuch.confirmDelTrip(\''+t.id+'\')" style="flex:1;padding:14px 16px;border-radius:var(--r);border:none;background:rgba(192,57,43,.2);color:#e74c3c;font-weight:700;cursor:pointer;font-family:var(--fd);font-size:14px">LOESCHEN</button>'
     + '</div>';
@@ -2828,6 +2890,87 @@ SCKR.fahrtenbuch.openBoatEditor = function(boatId) {
   SCKR.fahrtenbuch._editBoatId = b.id;
   if(isNew) st.boats.push(b);
   SCKR.core.ui.openSheet(html);
+};
+
+SCKR.fahrtenbuch.showCloudSetup = function() {
+  var st = SCKR.fahrtenbuch.state;
+  var current = st.profile.cloudApiKey || "";
+  var html = '<div class="sheet-hd"><h3>CLOUD-BACKUP EINRICHTEN</h3>'
+    + '<button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">X</button></div>'
+    + '<div style="padding:16px 14px">'
+    // Anleitung
+    + '<div style="background:var(--bg3);border-radius:8px;padding:12px 14px;margin-bottom:16px">'
+    + '<div style="font-family:var(--fd);font-size:11px;font-weight:700;color:var(--acc);letter-spacing:.08em;margin-bottom:8px">SO RICHTEST DU ES EIN:</div>'
+    + '<div style="font-size:12px;color:var(--off);line-height:1.8">'
+    + '1&#8194;<strong style="color:var(--wh)">jsonbin.io</strong> im Browser öffnen<br>'
+    + '2&#8194;Kostenlosen Account erstellen<br>'
+    + '3&#8194;Oben rechts: <strong style="color:var(--wh)">API Keys</strong> → Master Key<br>'
+    + '4&#8194;Key hier unten einfügen<br>'
+    + '5&#8194;Fertig — deine Fahrten werden nach jeder Fahrt automatisch gesichert'
+    + '</div></div>'
+    // Eingabe
+    + '<div class="fld"><label class="lbl">Master-Key von jsonbin.io</label>'
+    + '<input class="inp" id="cloud-key-inp" type="password" value="'+(current?'••••••••••':'')
+    +'" placeholder="$2b$10$..." autocomplete="off">'
+    + '<div style="font-size:10px;color:var(--mut);margin-top:4px">Dein Key wird nur lokal auf diesem Gerät gespeichert.</div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">'
+    + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.saveCloudKey()">SPEICHERN</button>'
+    + '<button type="button" class="btn btn-ghost" onclick="SCKR.core.ui.closeSheet()">ABBRECHEN</button>'
+    + '</div>'
+    + (current ? '<div style="margin-top:10px;text-align:center"><button type="button" style="font-size:11px;color:var(--mut);background:none;border:none;cursor:pointer" onclick="SCKR.fahrtenbuch.removeCloudKey()">Key entfernen</button></div>' : '')
+    + '</div>';
+  SCKR.core.ui.openSheet(html);
+  setTimeout(function(){
+    var inp = document.getElementById("cloud-key-inp");
+    if(inp) { inp.value = ""; inp.focus(); }
+  }, 300);
+};
+
+SCKR.fahrtenbuch.saveCloudKey = async function() {
+  var inp = document.getElementById("cloud-key-inp");
+  if(!inp || !inp.value.trim()) {
+    SCKR.core.ui.toast("Bitte API-Key eingeben");
+    return;
+  }
+  var st = SCKR.fahrtenbuch.state;
+  var key = inp.value.trim();
+  SCKR.core.ui.toast("KEY WIRD GETESTET...");
+  // Test: kleinen Ping an JSONBin
+  try {
+    var resp = await fetch("https://api.jsonbin.io/v3/b", {
+      method: "GET",
+      headers: { "X-Master-Key": key }
+    });
+    if(resp.status === 401) throw new Error("Falscher Key");
+    st.profile.cloudApiKey = key;
+    await SCKR.core.storage.set("profile", st.profile);
+    SCKR.core.ui.closeSheet();
+    SCKR.core.ui.toast("CLOUD-BACKUP AKTIVIERT ✓");
+    SCKR.fahrtenbuch.render.settings();
+  } catch(e) {
+    SCKR.core.ui.toast("KEY UNGÜLTIG — bitte prüfen");
+  }
+};
+
+SCKR.fahrtenbuch.removeCloudKey = async function() {
+  var st = SCKR.fahrtenbuch.state;
+  st.profile.cloudApiKey = "";
+  st.profile.cloudBinId = "";
+  await SCKR.core.storage.set("profile", st.profile);
+  SCKR.core.ui.closeSheet();
+  SCKR.core.ui.toast("CLOUD-BACKUP DEAKTIVIERT");
+  SCKR.fahrtenbuch.render.settings();
+};
+
+SCKR.fahrtenbuch.saveProfileName = async function() {
+  var inp = document.getElementById("prof-name-inp");
+  if(!inp) return;
+  var st = SCKR.fahrtenbuch.state;
+  st.profile.name = inp.value.trim();
+  await SCKR.core.storage.set("profile", st.profile);
+  SCKR.core.ui.toast("NAME GESPEICHERT");
+  SCKR.fahrtenbuch.render.settings();
 };
 
 SCKR.fahrtenbuch.setUnitSystem = async function(mode) {
@@ -3283,13 +3426,16 @@ SCKR.fahrtenbuch.exportExcel = async function() {
       var cls = [t.boatClass,t.sailNumber].filter(Boolean).join(" ");
       if(cls) sheet = inject(sheet,"C"+r,inlCell("C"+r,cls));
       if(t.yachtName) sheet = inject(sheet,"D"+r,inlCell("D"+r,t.yachtName));
-      // Segel-km: bevorzuge GPS-Segel (segelKm), Fallback auf sailKm
-      var exSegelKm = t.segelKm || t.sailKm || 0;
-      var exMotorKm = t.motorKmGps || t.motorKm || 0;
-      if(exSegelKm) sheet = inject(sheet,"E"+r,numCell("E"+r,exSegelKm));
-      if(t.sailSm)  sheet = inject(sheet,"F"+r,numCell("F"+r,t.sailSm));
-      if(exMotorKm) sheet = inject(sheet,"G"+r,numCell("G"+r,exMotorKm));
-      if(t.motorSm) sheet = inject(sheet,"H"+r,numCell("H"+r,t.motorSm));
+      // Segel: immer in km — sm wird umgerechnet, beide Werte gespeichert
+      var exSegelKm = t.segelKm || t.sailKm || ((t.sailSm||0)*1.852) || 0;
+      var exSegelSm = t.sailSm  || (exSegelKm > 0 ? Math.round(exSegelKm/1.852*100)/100 : 0);
+      var exMotorKm = t.motorKm || ((t.motorSm||0)*1.852) || 0;
+      var exMotorSm = t.motorSm || (exMotorKm > 0 ? Math.round(exMotorKm/1.852*100)/100 : 0);
+      // E = Segel km, F = Segel sm, G = Motor km, H = Motor sm
+      if(exSegelKm) sheet = inject(sheet,"E"+r,numCell("E"+r,Math.round(exSegelKm*100)/100));
+      if(exSegelSm) sheet = inject(sheet,"F"+r,numCell("F"+r,Math.round(exSegelSm*100)/100));
+      if(exMotorKm) sheet = inject(sheet,"G"+r,numCell("G"+r,Math.round(exMotorKm*100)/100));
+      if(exMotorSm) sheet = inject(sheet,"H"+r,numCell("H"+r,Math.round(exMotorSm*100)/100));
       if(t.fernKm) sheet = inject(sheet,"I"+r,numCell("I"+r,t.fernKm));
       if(t.bridges) sheet = inject(sheet,"J"+r,numCell("J"+r,t.bridges));
       if(t.locks) sheet = inject(sheet,"L"+r,numCell("L"+r,t.locks));
