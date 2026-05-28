@@ -509,8 +509,12 @@ window.SCKR = {
 SCKR.core.storage = {
   async get(k) {
     try {
-      if (window.storage) { var r = await window.storage.get(k, false); return r ? JSON.parse(r.value) : null; }
-      var v = localStorage.getItem("sckr_" + k); return v ? JSON.parse(v) : null;
+      if (window.storage) {
+        var r = await window.storage.get(k, false);
+        return r ? JSON.parse(r.value) : null;
+      }
+      var v = localStorage.getItem("sckr_" + k);
+      return v ? JSON.parse(v) : null;
     } catch(e) { return null; }
   },
   async set(k, v) {
@@ -2177,9 +2181,6 @@ SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
 
 /* -- Live Dashboard -- */
 SCKR.fahrtenbuch.render.live = function() {
-  // Immer zum Anfang scrollen damit GPS-Panel sichtbar
-  var _el = document.getElementById('live');
-  if(_el) _el.scrollTop = 0;
   var st = SCKR.fahrtenbuch.state;
   var esc = SCKR.core.fmt.esc;
   var el = document.getElementById("live");
@@ -3553,6 +3554,7 @@ SCKR.fahrtenbuch.exportExcel = async function() {
 
 /* -- INIT -- */
 (async function() {
+  try {
   // Admin first
   await SCKR.admin.init();
 
@@ -3605,11 +3607,34 @@ SCKR.fahrtenbuch.exportExcel = async function() {
   }, 500);
 
   SCKR.core.ui.renderSponsors();
-  SCKR.fahrtenbuch.render.live();
-  // Scroll to top so GPS panel is visible
-  var liveEl = document.getElementById('live');
-  if(liveEl) liveEl.scrollTop = 0;
-  document.body.scrollTop = 0; document.documentElement.scrollTop = 0;
+  // goto('live') setzt active-Klasse + ruft render.live()
+  setTimeout(function() {
+    SCKR.core.goto('live');
+  }, 80);
+  } catch(e) {
+    console.error('Init error:', e);
+    setTimeout(function(){ SCKR.core.goto('live'); }, 200);
+  }
+})();
+</script>
+
+<script>
+// Failsafe: render live tab if async init hangs (z.B. in Preview-Umgebungen)
+(function() {
+  var rendered = false;
+  function tryRender() {
+    if(rendered) return;
+    var el = document.getElementById('live');
+    if(!el || !SCKR || !SCKR.fahrtenbuch || !SCKR.fahrtenbuch.render) return;
+    if(el.children.length === 0) {
+      rendered = true;
+      SCKR.core.goto('live');
+    }
+  }
+  // Mehrere Versuche mit steigendem Delay
+  [100, 300, 600, 1200].forEach(function(ms) {
+    setTimeout(tryRender, ms);
+  });
 })();
 </script>
 </body>
