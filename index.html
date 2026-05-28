@@ -2425,6 +2425,7 @@ SCKR.fahrtenbuch.render.trips = function() {
 SCKR.fahrtenbuch.setFilterYear = function(y) {
   SCKR.fahrtenbuch.state.filterYear = y||"all";
   SCKR.fahrtenbuch.render.trips();
+  SCKR.fahrtenbuch.render.stats();
 };
 
 SCKR.fahrtenbuch.render.stats = function() {
@@ -2608,7 +2609,19 @@ SCKR.fahrtenbuch.render.settings = function() {
   if(!el) return;
   var st = SCKR.fahrtenbuch.state;
   var esc = SCKR.core.fmt.esc;
-  var html = '<div class="shead"><div><div class="lxs">SCKR Kruepelsee</div><h2>Profil &amp; Boote</h2></div></div>';
+  var profileName = st.profile.name || "";
+  var html = '<div class="shead"><div>'
+    + '<div class="lxs">' + (profileName ? esc(profileName) : 'Mein Profil') + '</div>'
+    + '<h2>Profil &amp; Boote</h2></div></div>';
+
+  // Profilname-Panel
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Mein Name</span></div>'
+    + '<div class="fld"><label class="lbl">Name (erscheint im Fahrtenbuch &amp; Excel)</label>'
+    + '<input class="inp" id="prof-name-inp" value="'+esc(st.profile.name||'')+'" placeholder="z.B. Max Mustermann" autocomplete="name"></div>'
+    + '<div style="padding:0 14px 14px">'
+    + '<button type="button" class="btn btn-red" style="font-size:13px;padding:10px" onclick="SCKR.fahrtenbuch.saveProfileName()">SPEICHERN</button>'
+    + '</div></div>';
+
   var boats = SCKR.core.boats ? SCKR.core.boats.list() : (st.boats||[]);
   html += '<div class="pnl"><div class="phd"><span class="phd-t">Meine Boote</span></div>';
   if(!boats.length) {
@@ -3442,13 +3455,26 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     };
 
     var st = SCKR.fahrtenbuch.state;
-    if(st.profile.name) sheet = inject(sheet,"C1",inlCell("C1",st.profile.name));
-    if(st.profile.age) sheet = inject(sheet,"C2",numCell("C2",st.profile.age));
+
+    // Name + Alter immer setzen (auch wenn leer)
+    sheet = inject(sheet,"C1",inlCell("C1",st.profile.name||""));
+    if(st.profile.age) sheet = inject(sheet,"C2",inlCell("C2",String(st.profile.age)));
+
+    // Stand-Datum aktualisieren
+    var today = new Date();
+    var standStr = "Stand: "+today.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"2-digit"});
+    sheet = inject(sheet,"B3",inlCell("B3",standStr));
+
+    var fmtDate = function(d) {
+      if(!d) return "";
+      var dt = new Date(d);
+      return dt.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"});
+    };
 
     var sorted = st.trips.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);}).slice(0,50);
     for(var j=0;j<sorted.length;j++) {
       var t = sorted[j], r = 6+j;
-      sheet = inject(sheet,"B"+r,numCell("B"+r,serial(t.date)));
+      sheet = inject(sheet,"B"+r,inlCell("B"+r,fmtDate(t.date)));
       var cls = [t.boatClass,t.sailNumber].filter(Boolean).join(" ");
       if(cls) sheet = inject(sheet,"C"+r,inlCell("C"+r,cls));
       if(t.yachtName) sheet = inject(sheet,"D"+r,inlCell("D"+r,t.yachtName));
