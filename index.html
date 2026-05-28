@@ -2201,7 +2201,7 @@ SCKR.fahrtenbuch.render.live = function() {
 
   // ── GPS freigegeben: Live-Screen ─────────────────────────
   var geoBanner = "";
-  if(st.profile && st.profile.autoTrack) {
+  if(st.profile && st.profile.autoTrack && activeBoat && activeBoat.autoTrack) {
     var ds = st.geoLastDist!=null ? " - "+st.geoLastDist+"m" : "";
     if(st.geoState==="away" || (st.tracking && st.geoAutoStarted))
       geoBanner = '<div class="geo on"><div class="geo-dot pulse" style="background:#4ecf88"></div>AUTO-TRACKING AKTIV'+ds+'</div>';
