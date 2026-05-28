@@ -395,7 +395,7 @@ if('serviceWorker' in navigator) {
 <script>document.documentElement.setAttribute("data-theme",localStorage.getItem("sckr_theme")||"dark");</script>
 <header class="hdr">
   <div class="hdr-top">
-    <div id="hdr-logo" onclick="SCKR.core.ui.promptLogoUpload()" title="Logo tippen zum Aendern">
+    <div id="hdr-logo" onclick="SCKR.core.ui.logoTap()" title="Logo tippen">
       <svg id="logo-svg" viewBox="0 0 44 44" width="44" height="44" style="display:none">
         <defs><radialGradient id="lg" cx="40%" cy="35%" r="65%"><stop offset="0%" stop-color="#163358"/><stop offset="100%" stop-color="#03101e"/></radialGradient></defs>
         <circle cx="22" cy="22" r="21" fill="url(#lg)" stroke="#C8A84B" stroke-width="1.2"/>
@@ -412,7 +412,7 @@ if('serviceWorker' in navigator) {
       <div class="club" id="club-name">Segel-Club Kruepelsee e.V.</div>
       <div class="title" id="app-title">Fahrtenbuch 2026</div>
     </div>
-    <a href="https://www.dsv.org/segeln/wettsegeln/wettfahrtregeln/" target="_blank" style="font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--mut);text-decoration:none;padding:5px 9px;border:1px solid var(--bdr2);border-radius:5px">Regelwerk</a>
+    <a href="https://berliner-segler-verband.de/images/Allgemein/Fahrtensegeln/2026/2026_Ausschrei" target="_blank" style="font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--mut);text-decoration:none;padding:5px 9px;border:1px solid var(--bdr2);border-radius:5px">Regelwerk</a>
   <button id="sync-badge" onclick="SCKR.admin.showLogin()" style="font-family:var(--fd);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--mut);background:transparent;border:1px solid var(--bdr2);border-radius:5px;padding:5px 9px;cursor:pointer">⚙ Admin</button>
   <button class="theme-toggle" id="theme-btn" onclick="SCKR.admin.toggleTheme()" title="Hell/Dunkel wechseln">☀︎</button>
   </div>
@@ -597,6 +597,22 @@ SCKR.core.ui = {
     reader.readAsDataURL(file);
     input.value="";
   },
+  logoTap: function() {
+    var img = document.getElementById('logo-img');
+    if(img && img.style.display !== 'none') {
+      // Show lightbox
+      var lb = document.createElement('div');
+      lb.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer';
+      lb.onclick = function(){ document.body.removeChild(lb); };
+      var lbImg = document.createElement('img');
+      lbImg.src = img.src;
+      lbImg.style.cssText = 'max-width:92vw;max-height:85vh;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.6);object-fit:contain';
+      lb.appendChild(lbImg);
+      document.body.appendChild(lb);
+    } else {
+      SCKR.core.ui.promptLogoUpload();
+    }
+  },
   applyLogo: function(b64) {
     var img=document.getElementById("logo-img"), svg=document.getElementById("logo-svg");
     if(!img||!svg) return;
@@ -684,7 +700,9 @@ SCKR.admin.state = {
     colorAcc: "#C8102E",
     colorBlue: "#1a3a6b"
   },
-  sponsors: { banner: [], footer: [] },
+  sponsors: { banner: [
+    {text:"Sponsored by Tom Tipolt", logoB64:"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", logoUrl:"", link:"https://tti-dilax.github.io"}
+  ], footer: ["Weitere Sponsoren können hier stehen — Kontakt: info@sckr.de"] },
   sponsorIdx: 0
 };
 
@@ -1117,7 +1135,8 @@ SCKR.admin.init = async function() {
   // Apply correct colors for current theme immediately
   SCKR.admin.applyColorsByTheme();
   var s = await SCKR.core.storage.get("admin_sponsors");
-  if(s) SCKR.admin.state.sponsors = s;
+  if(s && (s.banner||[]).length > 0) SCKR.admin.state.sponsors = s;
+  else if(s && s.footer && s.footer.length > 0) SCKR.admin.state.sponsors = s;
   var f = await SCKR.core.storage.get("admin_features");
   if(f) { for(var k in f) SCKR.config.features[k] = f[k]; }
   SCKR.admin.applyBranding();
@@ -2158,6 +2177,9 @@ SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
 
 /* -- Live Dashboard -- */
 SCKR.fahrtenbuch.render.live = function() {
+  // Immer zum Anfang scrollen damit GPS-Panel sichtbar
+  var _el = document.getElementById('live');
+  if(_el) _el.scrollTop = 0;
   var st = SCKR.fahrtenbuch.state;
   var esc = SCKR.core.fmt.esc;
   var el = document.getElementById("live");
@@ -3582,7 +3604,12 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     }
   }, 500);
 
+  SCKR.core.ui.renderSponsors();
   SCKR.fahrtenbuch.render.live();
+  // Scroll to top so GPS panel is visible
+  var liveEl = document.getElementById('live');
+  if(liveEl) liveEl.scrollTop = 0;
+  document.body.scrollTop = 0; document.documentElement.scrollTop = 0;
 })();
 </script>
 </body>
