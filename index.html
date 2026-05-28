@@ -820,6 +820,7 @@ SCKR.admin.openPanel = function() {
   var b = SCKR.admin.state.branding;
   var s = SCKR.admin.state.sponsors;
   var esc = SCKR.core.fmt.esc;
+  var st = SCKR.fahrtenbuch.state;
 
   var html = '<div class="sheet-hd"><h3>ADMIN-PANEL</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
 
@@ -2660,7 +2661,9 @@ SCKR.fahrtenbuch.render.settings = function() {
   }
   html += '</div>';
 
-    html += '<div class="pnl"><div class="phd"><span class="phd-t">Einheiten</span></div>'
+  // Einheiten-Umschalter
+  var u = st.profile.unitSystem || "auto";
+  html += '<div class="pnl"><div class="phd"><span class="phd-t">Einheiten</span></div>'
     + '<div class="trow" style="gap:6px;flex-wrap:wrap">'
     + '<button type="button" onclick="SCKR.fahrtenbuch.setUnitSystem(\'auto\')" class="btn '+(u==="auto"?"btn-red":"btn-ghost")+'" style="flex:1;padding:10px;font-size:12px">AUTO</button>'
     + '<button type="button" onclick="SCKR.fahrtenbuch.setUnitSystem(\'metric\')" class="btn '+(u==="metric"?"btn-red":"btn-ghost")+'" style="flex:1;padding:10px;font-size:12px">km/h · km</button>'
