@@ -1603,9 +1603,14 @@ SCKR.fahrtenbuch.startPosWatch = function() {
 
     st.currentPos = newPos;
 
-    // Karten-Marker
-    if(SCKR.fahrtenbuch.render.mapInst && SCKR.fahrtenbuch.render.posMarker) {
-      SCKR.fahrtenbuch.render.posMarker.setLatLng([newPos.lat, newPos.lng]);
+    // Karten-Marker (Position + Richtungspfeil)
+    if(SCKR.fahrtenbuch.render.mapInst) {
+      SCKR.fahrtenbuch.render.updateLiveMarker();
+      // Einmalige Zentrierung sobald erster GPS-Fix da ist
+      if(SCKR.fahrtenbuch.render._needGpsCenter) {
+        SCKR.fahrtenbuch.render.mapInst.setView([newPos.lat, newPos.lng], 16);
+        SCKR.fahrtenbuch.render._needGpsCenter = false;
+      }
     }
 
     // Gauges aktualisieren
@@ -2265,6 +2270,43 @@ SCKR.fahrtenbuch.render.destroyMap = function() {
   }
 };
 
+SCKR.fahrtenbuch.render.updateLiveMarker = function() {
+  var R = SCKR.fahrtenbuch.render;
+  var st = SCKR.fahrtenbuch.state;
+  if(!R.mapInst || !st.currentPos) return;
+  if(R.posMarker) { try { R.mapInst.removeLayer(R.posMarker); } catch(e){} R.posMarker = null; }
+  var spd = st.currentSpeed || 0;
+  var hdg = st.currentHeading;
+  var moving = spd > 0.5;  // m/s
+  var html;
+  if(moving && hdg != null && !isNaN(hdg)) {
+    html = '<div style="transform:rotate('+hdg+'deg)">'
+      + '<svg width="30" height="30" viewBox="0 0 30 30">'
+      + '<circle cx="15" cy="15" r="10" fill="rgba(26,171,160,.25)" stroke="#1AABA0" stroke-width="1.5"/>'
+      + '<path d="M15 4 L21 18 L15 14 L9 18 Z" fill="#1AABA0" stroke="#fff" stroke-width="0.8"/>'
+      + '</svg></div>';
+  } else {
+    html = '<div><svg width="24" height="24" viewBox="0 0 24 24">'
+      + '<circle cx="12" cy="12" r="8" fill="rgba(26,171,160,.25)" stroke="#1AABA0" stroke-width="1.5"/>'
+      + '<circle cx="12" cy="12" r="4" fill="#1AABA0" stroke="#fff" stroke-width="1.5"/>'
+      + '</svg></div>';
+  }
+  var icon = L.divIcon({className:'', html:html, iconSize:[30,30], iconAnchor:[15,15]});
+  R.posMarker = L.marker([st.currentPos.lat, st.currentPos.lng], {icon:icon, interactive:false, zIndexOffset:1000}).addTo(R.mapInst);
+};
+
+SCKR.fahrtenbuch.render.centerOnMe = function() {
+  var R = SCKR.fahrtenbuch.render;
+  var st = SCKR.fahrtenbuch.state;
+  if(st.currentPos) {
+    if(R.mapInst) R.mapInst.setView([st.currentPos.lat, st.currentPos.lng], Math.max(R.mapInst.getZoom(), 15));
+    SCKR.fahrtenbuch.render.updateLiveMarker();
+  } else {
+    SCKR.core.ui.toast("GPS WIRD AKTIVIERT...");
+    if(SCKR.fahrtenbuch.requestGPS) SCKR.fahrtenbuch.requestGPS();
+  }
+};
+
 SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
   var R = SCKR.fahrtenbuch.render;
   var st = SCKR.fahrtenbuch.state;
@@ -2323,14 +2365,32 @@ SCKR.fahrtenbuch.render.showMap = function(containerId, pts, evs) {
     });
     tiles.addTo(R.mapInst);
 
+    // Locate-Button auf der Karte
+    try {
+      var LocCtrl = L.Control.extend({
+        options:{position:'topright'},
+        onAdd:function(){
+          var b=L.DomUtil.create('button');
+          b.innerHTML='&#9678;';
+          b.title='Auf meine Position';
+          b.style.cssText='width:36px;height:36px;font-size:20px;line-height:1;background:#0a1828;color:#1AABA0;border:2px solid #1AABA0;border-radius:8px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4)';
+          L.DomEvent.on(b,'click',function(e){ L.DomEvent.stop(e); SCKR.fahrtenbuch.render.centerOnMe(); });
+          return b;
+        }
+      });
+      R.mapInst.addControl(new LocCtrl());
+    } catch(e) {}
+    // Wenn beim Öffnen noch kein GPS-Fix da war, einmal zentrieren sobald er kommt
+    R._needGpsCenter = !st.currentPos;
+
     // Home port
     if(hp.lat && hp.lng) {
       R.homeMarker = L.circleMarker([hp.lat, hp.lng], {radius:7,color:"#C8A84B",fillColor:"#C8A84B",fillOpacity:0.7,weight:2}).bindPopup("Heimathafen: "+SCKR.core.fmt.esc(hp.name)).addTo(R.mapInst);
     }
 
-    // Current position
+    // Current position (Live-Marker mit Richtungspfeil bei Bewegung)
     if(st.currentPos) {
-      R.posMarker = L.circleMarker([st.currentPos.lat,st.currentPos.lng], {radius:9,color:"#fff",fillColor:"#1AABA0",fillOpacity:1,weight:2}).bindPopup("Mein Standort").addTo(R.mapInst);
+      SCKR.fahrtenbuch.render.updateLiveMarker();
     }
 
     // Track
