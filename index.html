@@ -1995,7 +1995,13 @@ SCKR.fahrtenbuch.startGeofence = function() {
         SCKR.fahrtenbuch._showGeoStopPrompt();
       }
     }
-    if(SCKR.core.currentTab==="live") SCKR.fahrtenbuch.render.live();
+    // Zurück am Hafen (nicht trackend) -> Start-Frage wieder scharf schalten
+    if(!st.tracking && d < 80) { st._geoStartAsked = false; }
+    // Nur bei tatsächlichem Statuswechsel neu rendern (sonst flackert die Karte bei jedem GPS-Fix)
+    if(SCKR.core.currentTab==="live" && st.geoState !== st._lastGeoRender) {
+      st._lastGeoRender = st.geoState;
+      SCKR.fahrtenbuch.render.live();
+    }
   }, function(){}, {enableHighAccuracy:true, maximumAge:15000, timeout:60000});
 };
 
@@ -2030,7 +2036,7 @@ SCKR.fahrtenbuch._geoConfirmStart = function() {
 SCKR.fahrtenbuch._geoDeclineStart = function() {
   SCKR.core.ui.closeSheet();
   var st = SCKR.fahrtenbuch.state;
-  st._geoStartAsked = false; // Kann nochmal fragen
+  st._geoStartAsked = true; // Erst wieder fragen wenn zurück am Hafen
   SCKR.core.ui.toast("TRACKING NICHT GESTARTET");
 };
 
@@ -2274,10 +2280,17 @@ SCKR.fahrtenbuch.render.updateLiveMarker = function() {
   var R = SCKR.fahrtenbuch.render;
   var st = SCKR.fahrtenbuch.state;
   if(!R.mapInst || !st.currentPos) return;
-  if(R.posMarker) { try { R.mapInst.removeLayer(R.posMarker); } catch(e){} R.posMarker = null; }
   var spd = st.currentSpeed || 0;
   var hdg = st.currentHeading;
   var moving = spd > 0.5;  // m/s
+  // Existierenden Marker nur verschieben (kein Neuaufbau = kein Flackern)
+  var hdgKey = moving ? Math.round((hdg||0)/8) : -1;  // Icon nur neu bei Stillstand<->Bewegung oder >8° Drehung
+  if(R.posMarker && R._liveHdgKey === hdgKey) {
+    R.posMarker.setLatLng([st.currentPos.lat, st.currentPos.lng]);
+    return;
+  }
+  R._liveHdgKey = hdgKey;
+  if(R.posMarker) { try { R.mapInst.removeLayer(R.posMarker); } catch(e){} R.posMarker = null; }
   var html;
   if(moving && hdg != null && !isNaN(hdg)) {
     html = '<div style="transform:rotate('+hdg+'deg)">'
