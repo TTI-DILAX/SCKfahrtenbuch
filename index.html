@@ -1976,6 +1976,7 @@ SCKR.fahrtenbuch.startGeofence = function() {
     // Polygon-Check: Bin ich auf dem gespeicherten Gewässer?
     var inWater = SCKR.fahrtenbuch.pointInWaterPolygon(
       pos.coords.latitude, pos.coords.longitude, activeBoat);
+    st.geoInWater = inWater;
 
     if(!st.tracking && inWater && isMoving) {
       st.geoState="away";
@@ -1998,8 +1999,9 @@ SCKR.fahrtenbuch.startGeofence = function() {
     // Zurück am Hafen (nicht trackend) -> Start-Frage wieder scharf schalten
     if(!st.tracking && d < 80) { st._geoStartAsked = false; }
     // Nur bei tatsächlichem Statuswechsel neu rendern (sonst flackert die Karte bei jedem GPS-Fix)
-    if(SCKR.core.currentTab==="live" && st.geoState !== st._lastGeoRender) {
+    if(SCKR.core.currentTab==="live" && (st.geoState !== st._lastGeoRender || st.geoInWater !== st._lastGeoInWater)) {
       st._lastGeoRender = st.geoState;
+      st._lastGeoInWater = st.geoInWater;
       SCKR.fahrtenbuch.render.live();
     }
   }, function(){}, {enableHighAccuracy:true, maximumAge:15000, timeout:60000});
@@ -2462,7 +2464,9 @@ SCKR.fahrtenbuch.render.live = function() {
     if(st.geoState==="away" || (st.tracking && st.geoAutoStarted))
       geoBanner = '<div class="geo on"><div class="geo-dot pulse" style="background:#4ecf88"></div>AUTO-TRACKING AKTIV'+ds+'</div>';
     else if(activeBoat && activeBoat.waterPolygon && activeBoat.waterPolygon.length > 2)
-      geoBanner = '<div class="geo watch"><div class="geo-dot pulse" style="background:var(--acc)"></div>GEWÄSSER ERKANNT — GEOFENCE OK'+ds+'</div>';
+      geoBanner = st.geoInWater
+        ? '<div class="geo on"><div class="geo-dot pulse" style="background:#4ecf88"></div>AUF DEM WASSER — GEOFENCE OK'+ds+'</div>'
+        : '<div class="geo watch"><div class="geo-dot" style="background:var(--acc)"></div>GEOFENCE BEREIT — WARTET AUF ABFAHRT'+ds+'</div>';
     else
       geoBanner = '<div class="geo watch" style="background:rgba(230,126,34,.12);border-left:3px solid var(--orange)"><div class="geo-dot" style="background:var(--orange)"></div><span style="color:var(--orange);font-weight:700">&#9888; GEOFENCE UNGENAU</span><button type="button" onclick="SCKR.fahrtenbuch.retryWaterPolygon()" style="margin-left:8px;font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--orange);background:none;color:var(--orange);cursor:pointer;font-family:var(--fd);font-weight:700">ERNEUT</button></div>';
   }
