@@ -1620,6 +1620,50 @@ SCKR.fahrtenbuch.startPosWatch = function() {
   }, function(){}, {enableHighAccuracy:true, maximumAge:3000, timeout:30000});
 };
 /* -- Tracking -- */
+/* -- Bildschirm anlassen während Tracking -- */
+SCKR.fahrtenbuch._wakeLock = null;
+SCKR.fahrtenbuch._wakeNative = false;
+
+SCKR.fahrtenbuch.acquireWakeLock = async function() {
+  // 1) Nativ (Capacitor KeepAwake) – zuverlässigste Variante in der App
+  try {
+    if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KeepAwake) {
+      await window.Capacitor.Plugins.KeepAwake.keepAwake();
+      SCKR.fahrtenbuch._wakeNative = true;
+      return;
+    }
+  } catch(e) {}
+  // 2) Web Wake Lock API (Android Chrome, iOS Safari 16.4+)
+  try {
+    if('wakeLock' in navigator) {
+      SCKR.fahrtenbuch._wakeLock = await navigator.wakeLock.request('screen');
+      SCKR.fahrtenbuch._wakeLock.addEventListener('release', function(){
+        SCKR.fahrtenbuch._wakeLock = null;
+      });
+    }
+  } catch(e) {}
+};
+
+SCKR.fahrtenbuch.releaseWakeLock = async function() {
+  try {
+    if(SCKR.fahrtenbuch._wakeNative && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KeepAwake) {
+      await window.Capacitor.Plugins.KeepAwake.allowSleep();
+      SCKR.fahrtenbuch._wakeNative = false;
+    }
+  } catch(e) {}
+  try {
+    if(SCKR.fahrtenbuch._wakeLock) { await SCKR.fahrtenbuch._wakeLock.release(); SCKR.fahrtenbuch._wakeLock = null; }
+  } catch(e) {}
+};
+
+// Web Wake Lock wird freigegeben wenn die Seite kurz in den Hintergrund geht
+// (z.B. Benachrichtigung) -> beim Zurückkehren erneut anfordern, falls noch getrackt wird.
+document.addEventListener('visibilitychange', function() {
+  if(document.visibilityState === 'visible' && SCKR.fahrtenbuch.state && SCKR.fahrtenbuch.state.tracking && !SCKR.fahrtenbuch._wakeLock && !SCKR.fahrtenbuch._wakeNative) {
+    SCKR.fahrtenbuch.acquireWakeLock();
+  }
+});
+
 SCKR.fahrtenbuch.startTracking = async function(prefill) {
   var st = SCKR.fahrtenbuch.state;
   var trip = SCKR.fahrtenbuch.newTrip(prefill);
@@ -1643,6 +1687,7 @@ SCKR.fahrtenbuch.startTracking = async function(prefill) {
   st.totalPauseMs = 0;
   st.anchorEvents = [];
   st.tracking = true;
+  SCKR.fahrtenbuch.acquireWakeLock();  // Bildschirm anlassen
   st.propulsionMode = "Segel";  // Default
   st.currentSegment = {mode:"Segel", startIdx:0, km:0};
   st.startT = Date.now();
@@ -1825,6 +1870,7 @@ SCKR.fahrtenbuch.stopTracking = async function() {
   st.activeTrip.anchorEvents = st.anchorEvents||[];
 
   st.tracking = false;
+  SCKR.fahrtenbuch.releaseWakeLock();  // Bildschirm wieder freigeben
   var saved = st.activeTrip;
   st.activeTrip = null;
   st.currentSegment = null;
