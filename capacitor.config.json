@@ -1,0 +1,8 @@
+{
+  "appId": "de.sckr.fahrtenbuch",
+  "appName": "SCKR Fahrtenbuch",
+  "webDir": "www",
+  "android": {
+    "useLegacyBridge": true
+  }
+}

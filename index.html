@@ -11279,84 +11279,121 @@ if('serviceWorker' in navigator) {
 
 <script>
 // ── CAPACITOR BRIDGE ─────────────────────────────────────
-// Erkennt ob App in Capacitor (native iOS/Android) oder Browser läuft.
-// Bei Capacitor: Background-GPS via nativem Plugin (GPS bleibt im Hintergrund aktiv).
-// Bei Browser/PWA: Standard navigator.geolocation (iOS Background nicht möglich).
+// Erkennt ob App in Capacitor (native Android/iOS) oder Browser läuft.
+// Nativ: Background-GPS via @capacitor-community/background-geolocation
+//        (API: addWatcher -> id, removeWatcher({id}); es gibt KEIN
+//        getCurrentLocation und KEIN removeAllWatchers).
+// Browser/PWA: Standard navigator.geolocation.
+// Garantien: nie mehr als ein aktiver nativer Watcher; clearWatch stoppt
+// GPS + Benachrichtigung zuverlässig, auch wenn addWatcher noch läuft.
+window.SCKR_GPS = (function() {
+  var NATIVE_ID = 'capacitor-watch';
+  var ids = [];   // aktive native Watcher-IDs
+  var gen = 0;    // erhöht bei jedem Stopp -> verspätete addWatcher-Ergebnisse werden sofort entfernt
 
-window.SCKR_GPS = {
-  _isNative: function() {
-    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  },
-
-  _bgGeo: null,  // Capacitor Background Geolocation Plugin
-
-  _initPlugin: async function() {
-    if(SCKR_GPS._bgGeo) return SCKR_GPS._bgGeo;
+  function isNative() {
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+    catch(e) { return false; }
+  }
+  function plugin() {
     try {
-      if(SCKR_GPS._isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
-        SCKR_GPS._bgGeo = window.Capacitor.Plugins.BackgroundGeolocation;
-        return SCKR_GPS._bgGeo;
+      var p = isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation;
+      return (p && typeof p.addWatcher === 'function') ? p : null;
+    } catch(e) { return null; }
+  }
+  function toPos(l) {
+    return { coords: {
+        latitude: l.latitude, longitude: l.longitude, accuracy: l.accuracy,
+        speed: (l.speed == null ? 0 : l.speed),
+        heading: (l.bearing == null ? null : l.bearing),
+        altitude: (l.altitude == null ? 0 : l.altitude) },
+      timestamp: l.time || Date.now() };
+  }
+  function appTitle() {
+    try { return (window.SCKR && SCKR.admin && SCKR.admin.state && SCKR.admin.state.branding && SCKR.admin.state.branding.appTitle)
+      || (window.SCKR_BUILD && SCKR_BUILD.branding && SCKR_BUILD.branding.appTitle) || 'Fahrtenbuch'; }
+    catch(e) { return 'Fahrtenbuch'; }
+  }
+  function removeId(p, id) {
+    try { return Promise.resolve(p.removeWatcher({ id: id })).catch(function(){}); }
+    catch(e) { return Promise.resolve(); }
+  }
+  function removeAll() {
+    var p = plugin();
+    var list = ids.splice(0);
+    if (!p) return Promise.resolve();
+    return Promise.all(list.map(function(id) { return removeId(p, id); }));
+  }
+
+  return {
+    NATIVE_ID: NATIVE_ID,
+    _isNative: isNative,
+    isNative: isNative,
+    _activeCount: function() { return ids.length; },
+
+    // Einmalige Position: nativ über kurzlebigen Watcher (ohne Hintergrund-Notification)
+    getCurrentPosition: function(ok, err, opts) {
+      var p = plugin();
+      if (!p) {
+        navigator.geolocation.getCurrentPosition(ok, err, opts || { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        return;
       }
-    } catch(e) {}
-    return null;
-  },
-
-  // Einmalige Positionsabfrage (wie getCurrentPosition)
-  getCurrentPosition: async function(success, error, opts) {
-    var plugin = await SCKR_GPS._initPlugin();
-    if(plugin) {
+      var done = false, wid = null;
+      var timer = setTimeout(function() {
+        if (done) return; done = true;
+        if (wid !== null) removeId(p, wid);
+        if (err) err({ code: 3, message: 'GPS-Timeout' });
+      }, (opts && opts.timeout) || 15000);
+      function finish() { clearTimeout(timer); if (wid !== null) removeId(p, wid); }
       try {
-        var loc = await plugin.getCurrentLocation({
-          enableHighAccuracy: true, timeout: 15000, maximumAge: 0
+        Promise.resolve(p.addWatcher({ requestPermissions: true, stale: false }, function(l, e) {
+          if (done) return;
+          if (e) { done = true; finish(); if (err) err(e); return; }
+          if (!l) return;
+          done = true; finish(); ok(toPos(l));
+        })).then(function(id) {
+          wid = id;
+          if (done) removeId(p, id);
+        }).catch(function(e) {
+          if (done) return; done = true; clearTimeout(timer); if (err) err(e);
         });
-        success({ coords: { latitude: loc.latitude, longitude: loc.longitude,
-          accuracy: loc.accuracy, speed: loc.speed || 0, heading: loc.bearing || null,
-          altitude: loc.altitude || 0 }, timestamp: loc.time || Date.now() });
-      } catch(e) { if(error) error(e); }
-    } else {
-      navigator.geolocation.getCurrentPosition(success, error, opts || {
-        enableHighAccuracy: true, timeout: 15000, maximumAge: 0
-      });
-    }
-  },
+      } catch(e) { if (!done) { done = true; clearTimeout(timer); if (err) err(e); } }
+    },
 
-  // Dauerhaftes GPS-Watching (läuft im Hintergrund wenn nativ)
-  watchPosition: async function(success, error, opts) {
-    var plugin = await SCKR_GPS._initPlugin();
-    if(plugin) {
+    // Dauerhaftes GPS (nativ: läuft im Hintergrund mit Benachrichtigung)
+    watchPosition: async function(ok, err, opts) {
+      var p = plugin();
+      if (!p) {
+        return navigator.geolocation.watchPosition(ok, err, opts || { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+      }
+      var myGen = gen;            // vor dem await merken: Stopp währenddessen bricht ab
+      await removeAll();          // nie zwei Watcher parallel
+      if (myGen !== gen) return null;
       try {
-        await plugin.addWatcher({
-          backgroundMessage: (((window.SCKR&&SCKR.admin&&SCKR.admin.state&&SCKR.admin.state.branding&&SCKR.admin.state.branding.appTitle)||'Fahrtenbuch')+' zeichnet deine Fahrt auf.'),
+        var id = await Promise.resolve(p.addWatcher({
+          backgroundMessage: appTitle() + ' zeichnet deine Fahrt auf.',
           backgroundTitle: 'GPS aktiv',
           requestPermissions: true,
           stale: false,
-          distanceFilter: 3  // Meter Mindestbewegung
-        }, function(loc, err) {
-          if(err) { if(error) error(err); return; }
-          success({ coords: { latitude: loc.latitude, longitude: loc.longitude,
-            accuracy: loc.accuracy, speed: loc.speed || 0, heading: loc.bearing || null,
-            altitude: loc.altitude || 0 }, timestamp: loc.time || Date.now() });
-        });
-        // Plugin gibt keine watchId zurück - wir simulieren eine
-        return 'capacitor-watch';
-      } catch(e) { if(error) error(e); return null; }
-    } else {
-      return navigator.geolocation.watchPosition(success, error, opts || {
-        enableHighAccuracy: true, maximumAge: 3000, timeout: 30000
-      });
-    }
-  },
+          distanceFilter: 3
+        }, function(l, e) {
+          if (e) { if (err) err(e); return; }
+          if (l) ok(toPos(l));
+        }));
+        if (myGen !== gen) { removeId(p, id); return null; }   // inzwischen gestoppt
+        ids.push(id);
+        return NATIVE_ID;
+      } catch(e) { if (err) err(e); return null; }
+    },
 
-  // Watch beenden
-  clearWatch: async function(watchId) {
-    if(watchId === 'capacitor-watch') {
-      var plugin = await SCKR_GPS._initPlugin();
-      if(plugin) { try { await plugin.removeAllWatchers(); } catch(e) {} }
-    } else if(watchId !== null && watchId !== undefined) {
-      navigator.geolocation.clearWatch(watchId);
+    // Watch beenden (gibt Promise zurück; Aufrufer muss nicht warten)
+    clearWatch: function(watchId) {
+      if (watchId === NATIVE_ID || watchId === 'cap') { gen++; return removeAll(); }
+      if (watchId !== null && watchId !== undefined) navigator.geolocation.clearWatch(watchId);
+      return Promise.resolve();
     }
-  }
-};
+  };
+})();
 // ── ENDE CAPACITOR BRIDGE ─────────────────────────────────
 </script>
 
@@ -13665,7 +13702,9 @@ SCKR.fahrtenbuch.render.live = function() {
       + '<div class="pnl"><div class="phd"><span class="phd-t">GPS-Freigabe</span></div>'
       + '<div class="idle-msg">Die App braucht Zugriff auf deinen Standort um Fahrten aufzuzeichnen und Brücken/Schleusen zu erkennen.</div>'
       + '<div style="padding:0 14px 14px"><button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.requestGPS()">GPS AKTIVIEREN</button></div></div>'
-      + '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Wichtig:</strong> Tab offen lassen waehrend der Fahrt. GPS stoppt wenn der Bildschirm sperrt.</div>'
+      + ((window.SCKR_GPS && SCKR_GPS.isNative && SCKR_GPS.isNative())
+          ? '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Tipp:</strong> Standort auf &bdquo;Immer erlauben&ldquo; stellen &ndash; dann l&auml;uft die Aufzeichnung auch bei gesperrtem Bildschirm weiter.</div>'
+          : '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Wichtig:</strong> Tab offen lassen waehrend der Fahrt. GPS stoppt wenn der Bildschirm sperrt.</div>')
       + (st.boats.length===0 ? '<div class="pnl"><div class="phd"><span class="phd-t">Boot anlegen</span></div><div class="idle-msg">Du brauchst mindestens 1 Boot.</div><div style="padding:0 14px 14px"><button class="btn btn-ghost" type="button" onclick="SCKR.core.goto(\'settings\')">ZU EINSTELLUNGEN</button></div></div>' : '');
     return;
   }
@@ -15810,7 +15849,8 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     }
   }, 500);
 
-  SCKR.core.ui.renderSponsors();
+  // Fix: SCKR.core.ui.renderSponsors existiert nicht -> Init brach hier ab und goto('live') lief nie
+  if (typeof SCKR.core.ui.renderSponsors === 'function') SCKR.core.ui.renderSponsors();
   // goto('live') setzt active-Klasse + ruft render.live()
   setTimeout(function() {
     SCKR.core.goto('live');
@@ -15843,105 +15883,6 @@ SCKR.fahrtenbuch.exportExcel = async function() {
 </script>
 </body>
 </html>
-<script>
-/* ── CAPACITOR GPS BRIDGE ──────────────────────────────────
-   Erkennt automatisch ob die App nativ (iOS/Android via Capacitor)
-   oder als PWA im Browser läuft.
-   - Nativ: Background-GPS via Capacitor-Plugin (GPS bleibt aktiv wenn
-     Bildschirm sperrt oder App im Hintergrund ist)
-   - Browser/PWA: Standard navigator.geolocation (iOS Background = kein GPS)
-   Der restliche App-Code nutzt nur noch SCKR_GPS.* statt navigator.geolocation.*
-   ──────────────────────────────────────────────────────── */
-window.SCKR_GPS = {
-  _isNative: function() {
-    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  },
-  _plugin: null,
-  _watchActive: false,
 
-  _getPlugin: function() {
-    if(SCKR_GPS._plugin) return SCKR_GPS._plugin;
-    try {
-      if(SCKR_GPS._isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
-        SCKR_GPS._plugin = window.Capacitor.Plugins.BackgroundGeolocation;
-      }
-    } catch(e) {}
-    return SCKR_GPS._plugin;
-  },
-
-  getCurrentPosition: function(success, error, opts) {
-    var plugin = SCKR_GPS._getPlugin();
-    if(plugin) {
-      plugin.getCurrentLocation({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
-        .then(function(loc) {
-          success({ coords: { latitude: loc.latitude, longitude: loc.longitude,
-            accuracy: loc.accuracy, speed: loc.speed||0, heading: loc.bearing||null },
-            timestamp: loc.time||Date.now() });
-        }).catch(function(e) { if(error) error(e); });
-    } else {
-      navigator.geolocation.getCurrentPosition(success, error,
-        opts || { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-    }
-  },
-
-  watchPosition: function(success, error, opts) {
-    var plugin = SCKR_GPS._getPlugin();
-    if(plugin) {
-      plugin.addWatcher({
-        backgroundMessage: 'SCKR Fahrtenbuch zeichnet deine Fahrt auf.',
-        backgroundTitle: 'SCKR GPS aktiv',
-        requestPermissions: true,
-        stale: false,
-        distanceFilter: 3
-      }, function(loc, err) {
-        if(err) { if(error) error(err); return; }
-        success({ coords: { latitude: loc.latitude, longitude: loc.longitude,
-          accuracy: loc.accuracy, speed: loc.speed||0, heading: loc.bearing||null },
-          timestamp: loc.time||Date.now() });
-      });
-      SCKR_GPS._watchActive = true;
-      return 'cap';
-    } else {
-      return navigator.geolocation.watchPosition(success, error,
-        opts || { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-    }
-  },
-
-  clearWatch: function(id) {
-    if(id === 'cap') {
-      var plugin = SCKR_GPS._getPlugin();
-      if(plugin) { try { plugin.removeAllWatchers(); } catch(e) {} }
-      SCKR_GPS._watchActive = false;
-    } else if(id !== null && id !== undefined) {
-      navigator.geolocation.clearWatch(id);
-    }
-  }
-};
-</script>
-
-
-<script>
-/* CAPACITOR GPS BRIDGE - auto-detects native vs PWA */
-window.SCKR_GPS = (function() {
-  function isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
-  function getPlugin() { try { return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation || null; } catch(e){ return null; } }
-  return {
-    getCurrentPosition: function(ok, err, opts) {
-      var p = getPlugin();
-      if(p) { p.getCurrentLocation({enableHighAccuracy:true,timeout:15000,maximumAge:0}).then(function(l){ok({coords:{latitude:l.latitude,longitude:l.longitude,accuracy:l.accuracy,speed:l.speed||0,heading:l.bearing||null},timestamp:l.time||Date.now()});}).catch(function(e){if(err)err(e);}); }
-      else { navigator.geolocation.getCurrentPosition(ok,err,opts||{enableHighAccuracy:true,timeout:15000,maximumAge:0}); }
-    },
-    watchPosition: function(ok, err, opts) {
-      var p = getPlugin();
-      if(p) { p.addWatcher({backgroundMessage:'SCKR Fahrtenbuch zeichnet deine Fahrt auf.',backgroundTitle:'SCKR GPS aktiv',requestPermissions:true,stale:false,distanceFilter:3},function(l,e){if(e){if(err)err(e);return;}ok({coords:{latitude:l.latitude,longitude:l.longitude,accuracy:l.accuracy,speed:l.speed||0,heading:l.bearing||null},timestamp:l.time||Date.now()});}); return 'cap'; }
-      else { return navigator.geolocation.watchPosition(ok,err,opts||{enableHighAccuracy:true,maximumAge:3000,timeout:30000}); }
-    },
-    clearWatch: function(id) {
-      if(id==='cap'){var p=getPlugin();if(p){try{p.removeAllWatchers();}catch(e){}}}
-      else if(id!==null&&id!==undefined){navigator.geolocation.clearWatch(id);}
-    }
-  };
-})();
-</script>
 
 
