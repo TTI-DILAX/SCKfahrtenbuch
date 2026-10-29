@@ -11318,11 +11318,51 @@ window.SCKR_GPS = (function() {
     try { return Promise.resolve(p.removeWatcher({ id: id })).catch(function(){}); }
     catch(e) { return Promise.resolve(); }
   }
+  // Android 13+: Benachrichtigungs-Erlaubnis aktiv anfragen, sonst ist die
+  // "GPS aktiv"-Notification unsichtbar (GPS läuft trotzdem).
+  var notifAsked = false;
+  function askNotifPermission() {
+    if (notifAsked) return Promise.resolve(); notifAsked = true;
+    try {
+      var ln = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+      if (!ln || typeof ln.requestPermissions !== 'function') return Promise.resolve();
+      return Promise.resolve(ln.requestPermissions()).catch(function(){});
+    } catch(e) { return Promise.resolve(); }
+  }
   function removeAll() {
     var p = plugin();
     var list = ids.splice(0);
     if (!p) return Promise.resolve();
     return Promise.all(list.map(function(id) { return removeId(p, id); }));
+  }
+
+  var chain = Promise.resolve();
+  async function startNative(p, ok, err, myGen) {
+    await removeAll();                      // nie zwei Watcher parallel
+    if (myGen !== gen) return null;
+    await askNotifPermission();
+    if (myGen !== gen) return null;
+    var id = null, failed = false;
+    try {
+      id = await Promise.resolve(p.addWatcher({
+        backgroundMessage: appTitle() + ' zeichnet deine Fahrt auf.',
+        backgroundTitle: 'GPS aktiv',
+        requestPermissions: true,
+        stale: false,
+        distanceFilter: 3
+      }, function(l, e) {
+        if (e) {
+          // z. B. NOT_AUTHORIZED: Watcher ist tot -> entfernen, damit ein späterer Re-Arm neu startet
+          if (!failed) { failed = true; var i = ids.indexOf(id); if (i > -1) ids.splice(i, 1); if (id !== null) removeId(p, id); }
+          if (err) err(e);
+          return;
+        }
+        if (l) ok(toPos(l));
+      }));
+    } catch(e) { if (err) err(e); return null; }
+    if (myGen !== gen || failed) { removeId(p, id); return null; }
+    ids.push(id);
+    return NATIVE_ID;
   }
 
   return {
@@ -11361,31 +11401,17 @@ window.SCKR_GPS = (function() {
     },
 
     // Dauerhaftes GPS (nativ: läuft im Hintergrund mit Benachrichtigung)
-    watchPosition: async function(ok, err, opts) {
+    // Nativ werden Aufrufe serialisiert -> auch bei parallelen Aufrufen max. ein Watcher.
+    watchPosition: function(ok, err, opts) {
       var p = plugin();
       if (!p) {
         return navigator.geolocation.watchPosition(ok, err, opts || { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
       }
-      var myGen = gen;            // vor dem await merken: Stopp währenddessen bricht ab
-      await removeAll();          // nie zwei Watcher parallel
-      if (myGen !== gen) return null;
-      try {
-        var id = await Promise.resolve(p.addWatcher({
-          backgroundMessage: appTitle() + ' zeichnet deine Fahrt auf.',
-          backgroundTitle: 'GPS aktiv',
-          requestPermissions: true,
-          stale: false,
-          distanceFilter: 3
-        }, function(l, e) {
-          if (e) { if (err) err(e); return; }
-          if (l) ok(toPos(l));
-        }));
-        if (myGen !== gen) { removeId(p, id); return null; }   // inzwischen gestoppt
-        ids.push(id);
-        return NATIVE_ID;
-      } catch(e) { if (err) err(e); return null; }
+      var myGen = gen;            // Stopp (clearWatch) während des Starts bricht ab
+      var run = chain.then(function() { return startNative(p, ok, err, myGen); });
+      chain = run.catch(function(){});
+      return run;
     },
-
     // Watch beenden (gibt Promise zurück; Aufrufer muss nicht warten)
     clearWatch: function(watchId) {
       if (watchId === NATIVE_ID || watchId === 'cap') { gen++; return removeAll(); }
@@ -12731,7 +12757,10 @@ window.addEventListener('pageshow', function(){ SCKR.fahrtenbuch._rearmWatch(); 
 SCKR.fahrtenbuch._rearmWatch = async function() {
   var st = SCKR.fahrtenbuch.state;
   if(!st || !st.tracking || !SCKR.fahrtenbuch._onFix) return;
-  if(st.watchId === 'capacitor-watch') return;
+  // Nativ läuft GPS im Hintergrund weiter -> nur neu starten, wenn wirklich kein Watcher
+  // aktiv ist (z. B. nach verweigerter und später erteilter Berechtigung).
+  if(SCKR_GPS.isNative && SCKR_GPS.isNative()) { if(SCKR_GPS._activeCount() > 0) return; }
+  else if(st.watchId === 'capacitor-watch') return;
   if(SCKR.fahrtenbuch._rearming) return;
   SCKR.fahrtenbuch._rearming = true;
   try {
@@ -12922,6 +12951,8 @@ SCKR.fahrtenbuch.startTracking = async function(prefill, resume) {
       }
       SCKR.fahrtenbuch._persistLive();
     }), (SCKR.fahrtenbuch._onFixErr = function(err){ SCKR.core.ui.toast("GPS: "+err.message); }), (SCKR.fahrtenbuch._watchOpts = {enableHighAccuracy:true, maximumAge:1000, timeout:30000}));
+    // Fahrt wurde beendet, während GPS noch startete -> sofort wieder stoppen
+    if(!st.tracking && st.watchId !== null) { SCKR_GPS.clearWatch(st.watchId); st.watchId = null; }
   } else {
     SCKR.core.ui.toast("GPS NICHT VERFUEGBAR");
   }
@@ -13011,6 +13042,7 @@ SCKR.fahrtenbuch._checkTrackGaps = function(pts) {
 SCKR.fahrtenbuch.stopTracking = async function() {
   var st = SCKR.fahrtenbuch.state;
   if(st.watchId!==null) { SCKR_GPS.clearWatch(st.watchId); st.watchId=null; }
+  else if(SCKR_GPS.isNative && SCKR_GPS.isNative()) { SCKR_GPS.clearWatch(SCKR_GPS.NATIVE_ID); } // Start lief noch
   clearInterval(st.timerId);
   if(!st.activeTrip) return;
 
@@ -13703,7 +13735,7 @@ SCKR.fahrtenbuch.render.live = function() {
       + '<div class="idle-msg">Die App braucht Zugriff auf deinen Standort um Fahrten aufzuzeichnen und Brücken/Schleusen zu erkennen.</div>'
       + '<div style="padding:0 14px 14px"><button class="btn btn-gold" type="button" onclick="SCKR.fahrtenbuch.requestGPS()">GPS AKTIVIEREN</button></div></div>'
       + ((window.SCKR_GPS && SCKR_GPS.isNative && SCKR_GPS.isNative())
-          ? '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Tipp:</strong> Standort auf &bdquo;Immer erlauben&ldquo; stellen &ndash; dann l&auml;uft die Aufzeichnung auch bei gesperrtem Bildschirm weiter.</div>'
+          ? '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Tipp:</strong> Standort &bdquo;Bei Nutzung der App&ldquo; und Benachrichtigungen erlauben, Akku-Optimierung f&uuml;r die App ausschalten &ndash; dann l&auml;uft die Aufzeichnung auch bei gesperrtem Bildschirm weiter.</div>'
           : '<div style="margin:0 14px 14px;padding:10px 12px;background:rgba(200,16,46,.08);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;font-size:12px;color:var(--off);line-height:1.6"><strong style="color:var(--acc)">Wichtig:</strong> Tab offen lassen waehrend der Fahrt. GPS stoppt wenn der Bildschirm sperrt.</div>')
       + (st.boats.length===0 ? '<div class="pnl"><div class="phd"><span class="phd-t">Boot anlegen</span></div><div class="idle-msg">Du brauchst mindestens 1 Boot.</div><div style="padding:0 14px 14px"><button class="btn btn-ghost" type="button" onclick="SCKR.core.goto(\'settings\')">ZU EINSTELLUNGEN</button></div></div>' : '');
     return;

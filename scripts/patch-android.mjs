@@ -81,6 +81,11 @@ if (!gradle.includes(MARK)) {
     `$1\n            if (System.getenv("ANDROID_KEYSTORE_FILE")) { signingConfig signingConfigs.release }`
   );
   if (!gradle.includes('signingConfig signingConfigs.release')) throw new Error('release-Block in build.gradle nicht gefunden');
+  // Debug-Build bekommt eigene App-ID -> kann nie die Vereins-App überschreiben/blockieren
+  gradle = gradle.replace(
+    /(buildTypes\s*\{)/,
+    `$1\n        debug {\n            applicationIdSuffix ".debug"\n            versionNameSuffix "-debug"\n        }`
+  );
 }
 writeFileSync(GRADLE, gradle);
 const show = (re) => (gradle.match(re) || ['?'])[0];
@@ -92,6 +97,23 @@ if (!strings.includes('capacitor_background_geolocation_notification_channel_nam
   strings = strings.replace(
     /<\/resources>/,
     '    <string name="capacitor_background_geolocation_notification_channel_name">Fahrtaufzeichnung</string>\n</resources>'
+  );
+  writeFileSync(STRINGS, strings);
+}
+// ── 4. Monochromes Benachrichtigungs-Icon (Wimpel) ────────
+// Plugin-Doku: Launcher-Icon (Raster, nicht transparent) führt zu fehlerhafter Notification.
+const ICON = 'android/app/src/main/res/drawable/ic_tracking.xml';
+writeFileSync(ICON, `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M3,3.5 L21,8.5 L4,20.5 Z" />
+</vector>
+`);
+strings = readFileSync(STRINGS, 'utf8');
+if (!strings.includes('capacitor_background_geolocation_notification_icon')) {
+  strings = strings.replace(
+    /<\/resources>/,
+    '    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>\n</resources>'
   );
   writeFileSync(STRINGS, strings);
 }
