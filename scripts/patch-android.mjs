@@ -81,7 +81,9 @@ if (!gradle.includes(MARK)) {
     `$1\n            if (System.getenv("ANDROID_KEYSTORE_FILE")) { signingConfig signingConfigs.release }`
   );
   if (!gradle.includes('signingConfig signingConfigs.release')) throw new Error('release-Block in build.gradle nicht gefunden');
-  // Debug-Build bekommt eigene App-ID -> kann nie die Vereins-App überschreiben/blockieren
+}
+// Debug-Build bekommt eigene App-ID -> kann nie die Vereins-App überschreiben/blockieren
+if (!gradle.includes('applicationIdSuffix ".debug"')) {
   gradle = gradle.replace(
     /(buildTypes\s*\{)/,
     `$1\n        debug {\n            applicationIdSuffix ".debug"\n            versionNameSuffix "-debug"\n        }`

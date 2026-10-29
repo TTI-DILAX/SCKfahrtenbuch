@@ -12759,14 +12759,15 @@ SCKR.fahrtenbuch._rearmWatch = async function() {
   if(!st || !st.tracking || !SCKR.fahrtenbuch._onFix) return;
   // Nativ läuft GPS im Hintergrund weiter -> nur neu starten, wenn wirklich kein Watcher
   // aktiv ist (z. B. nach verweigerter und später erteilter Berechtigung).
-  if(SCKR_GPS.isNative && SCKR_GPS.isNative()) { if(SCKR_GPS._activeCount() > 0) return; }
+  var nativeGps = !!(SCKR_GPS.isNative && SCKR_GPS.isNative());
+  if(nativeGps) { if(SCKR_GPS._activeCount() > 0 || st.watchId === null) return; }  // null = Start läuft noch
   else if(st.watchId === 'capacitor-watch') return;
   if(SCKR.fahrtenbuch._rearming) return;
   SCKR.fahrtenbuch._rearming = true;
   try {
     if(st.watchId !== null && st.watchId !== undefined) { try { SCKR_GPS.clearWatch(st.watchId); } catch(e){} }
     st.watchId = await SCKR_GPS.watchPosition(SCKR.fahrtenbuch._onFix, SCKR.fahrtenbuch._onFixErr, SCKR.fahrtenbuch._watchOpts);
-    SCKR.core.ui.toast("GPS WIEDER VERBUNDEN");
+    if(st.watchId !== null && st.watchId !== undefined && (!nativeGps || SCKR_GPS._activeCount() > 0)) SCKR.core.ui.toast("GPS WIEDER VERBUNDEN");
   } catch(e) {}
   SCKR.fahrtenbuch._rearming = false;
 };
