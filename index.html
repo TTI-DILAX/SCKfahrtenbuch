@@ -11517,7 +11517,7 @@ SCKR.core.storage = (function() {
   // (Theme/Farben brauchen dort weiter Platz). Große GPS-Fahrten liegen nur in IndexedDB.
   function mirrorSet(k, v) {
     if (NO_MIRROR.test(k)) return;
-    try { var j = JSON.stringify(v); if (j.length > 100000) return;   // vorhandene alte Kopie bleibt unangetastet localStorage.setItem(LS + k, j); }
+    try { var j = JSON.stringify(v); if (j.length > 100000) return; /* vorhandene alte Kopie bleibt unangetastet */ localStorage.setItem(LS + k, j); }
     catch(e) { /* voll: egal, IndexedDB ist maßgeblich */ }
   }
   function mirrorDel(k) { try { localStorage.removeItem(LS + k); } catch(e) {} }
@@ -11668,7 +11668,7 @@ SCKR.core.ui = {
 
 // Formatters
 SCKR.core.fmt = {
-  esc: function(s) { return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); },
+  esc: function(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); },
   date: function(d) { return new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"short",year:"numeric"}); },
   time: function(s) { if(s<3600) return Math.floor(s/60)+"m "+s%60+"s"; return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m"; },
   dist: function(km,cat) { if(cat==="Binnen") return km.toFixed(2)+" km"; return (km/1.852).toFixed(2)+" sm"; },
@@ -12351,8 +12351,9 @@ SCKR.admin.renderSponsors = function() {
     banner.style.display = "flex";
     var bt = document.getElementById("spon-banner-text");
     if(bt) {
-      bt.innerHTML = (sp.logoUrl ? '<img src="'+sp.logoUrl+'" style="height:16px;width:auto;vertical-align:middle;margin-right:6px;border-radius:2px" onerror="this.style.display=\'none\'">' : '')
-        + (sp.link ? '<a href="'+sp.link+'" target="_blank" style="color:var(--off);text-decoration:none">'+sp.text+'</a>' : sp.text);
+      var _e = SCKR.core.fmt.esc, _ok = function(u){ return /^(https:\/\/|data:image\/)/i.test(String(u||"")); };
+      bt.innerHTML = (sp.logoUrl && _ok(sp.logoUrl) ? '<img src="'+_e(sp.logoUrl)+'" style="height:16px;width:auto;vertical-align:middle;margin-right:6px;border-radius:2px" onerror="this.style.display=\'none\'">' : '')
+        + (sp.link && /^https:\/\//i.test(String(sp.link)) ? '<a href="'+_e(sp.link)+'" target="_blank" rel="noopener" style="color:var(--off);text-decoration:none">'+_e(sp.text)+'</a>' : _e(sp.text));
     }
   } else {
     banner.style.display = "none";
@@ -12610,6 +12611,14 @@ SCKR.fahrtenbuch._renderSeasonCloseBox = function() {
   }
   return '<div style="'+box+';display:flex;align-items:center;gap:10px"><div style="flex:1">\uD83D\uDCD8 Bordbuch '+y+' schon abgegeben? Dann z\u00E4hlen neue Fahrten f\u00FCr '+next+'.</div>'
     + '<button type="button" class="btn btn-ghost" style="padding:8px 10px;font-size:12px;white-space:nowrap" onclick="SCKR.fahrtenbuch.openSeasonClose()">ABGEGEBEN</button></div>';
+};
+
+// Gesamtstrecke einer Fahrt in km (t.km wird nirgends gesetzt)
+SCKR.fahrtenbuch.tripKm = function(t) {
+  if(!t) return 0;
+  var s = t.segelKm || t.sailKm || ((t.sailSm||0)*1.852) || 0;
+  var m = t.motorKm || ((t.motorSm||0)*1.852) || 0;
+  return (+s||0) + (+m||0);
 };
 
 SCKR.fahrtenbuch.newTrip = function(p) {
@@ -14165,7 +14174,7 @@ SCKR.fahrtenbuch.render.trips = function() {
         + '<div style="font-size:13px;color:var(--off);margin-bottom:6px">'+esc(t.description||t.route||"")+'</div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
         + '<span class="chip">'+esc(t.category||"")+'</span>'
-        + '<span class="chip">'+(t.km||0).toFixed(2)+' km</span>'
+        + '<span class="chip">'+SCKR.fahrtenbuch.tripKm(t).toFixed(1)+' km</span>'
         + (t.boat?'<span class="chip">'+esc(t.boat)+'</span>':'')
         + (t.isTracked?'<span class="chip gps">GPS</span>':'')
         + (t._source==="regatta"?'<span class="chip" style="color:var(--acc)">Regatta</span>':'')
@@ -15727,13 +15736,42 @@ SCKR.fahrtenbuch._importSeasonClose = function(inc) {
   SCKR.core.storage.set("seasonClose", sc).catch(function(){});
 };
 
+// ── Import absichern: Texte entschärfen, IDs/Datum/Zahlen prüfen ──
+SCKR.fahrtenbuch._cleanStr = function(v) { return String(v).replace(/</g,"\u2039").replace(/>/g,"\u203A").replace(/"/g,"\u201D").replace(/'/g,"\u2019").replace(/`/g,"\u2019").slice(0,5000); };
+SCKR.fahrtenbuch._cleanObj = function(o, depth) {
+  depth = depth||0; if(depth>4) return null;
+  if(Array.isArray(o)) return o.map(function(x){ return SCKR.fahrtenbuch._cleanObj(x, depth+1); });
+  if(o && typeof o === "object") { var r={}; Object.keys(o).forEach(function(k){ if(/^[\w$]{1,40}$/.test(k)) r[k]=SCKR.fahrtenbuch._cleanObj(o[k], depth+1); }); return r; }
+  if(typeof o === "string") return SCKR.fahrtenbuch._cleanStr(o);
+  if(typeof o === "number") return isFinite(o) ? o : 0;
+  if(typeof o === "boolean" || o === null) return o;
+  return null;
+};
+SCKR.fahrtenbuch._sanitizeImport = function(list, isBoat) {
+  var NUM = ["sailKm","sailSm","motorKm","motorSm","fernKm","segelKm","bridges","locks","maxSpeed","avgSpeed","pauseMs","segelMs","motorMs","homePortLat","homePortLon"];
+  return list.filter(function(x){ return x && typeof x === "object"; }).map(function(x){
+    // Trackpunkte enthalten nur Zahlen -> schnell übernehmen, Rest gründlich säubern
+    var pts = x.trackPoints; var y = Object.assign({}, x); delete y.trackPoints;
+    y = SCKR.fahrtenbuch._cleanObj(y);
+    y.trackPoints = Array.isArray(pts) ? pts.filter(function(p){ return p && isFinite(+p.lat) && isFinite(+p.lng); }) : [];
+    if(!/^[\w-]{1,64}$/.test(String(y.id||""))) y.id = SCKR.core.util.uuid();
+    NUM.forEach(function(k){ if(y[k]!==undefined){ var n=+y[k]; y[k]=isFinite(n)?n:0; } });
+    if(isBoat) { delete y.trackPoints; return y; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(y.date||""))) return null;
+    return y;
+  }).filter(Boolean);
+};
+
 SCKR.fahrtenbuch.importJSON = function(input) {
   var file = input.files[0]; if(!file) return;
   file.text().then(function(text) {
     var data;
     try { data = JSON.parse(text); } catch(e) { SCKR.core.ui.toast("UNGUELTIGE JSON-DATEI"); return; }
-    var incoming = data.trips || [];
-    SCKR.fahrtenbuch._importMeta = {boats:data.boats, profile:data.profile, branding:data.branding, sponsors:data.sponsors};
+    var incoming = SCKR.fahrtenbuch._sanitizeImport(Array.isArray(data.trips) ? data.trips : []);
+    var _skippedBad = (Array.isArray(data.trips) ? data.trips.length : 0) - incoming.length;
+    if(_skippedBad > 0) SCKR.core.ui.toast(_skippedBad+" UNG\u00DCLTIGE FAHRT(EN) \u00DCBERSPRUNGEN");
+    // Branding/Sponsoren werden aus Sicherheitsgründen NICHT importiert (nur über Admin änderbar)
+    SCKR.fahrtenbuch._importMeta = {boats:SCKR.fahrtenbuch._sanitizeImport(Array.isArray(data.boats) ? data.boats : [], true), profile:(data.profile && typeof data.profile==="object") ? SCKR.fahrtenbuch._cleanObj(data.profile) : null};
     SCKR.fahrtenbuch._importSeasonClose(data.seasonClose);
     if(incoming.length === 0) { SCKR.core.ui.toast("KEINE FAHRTEN IN DATEI"); return; }
     SCKR.fahrtenbuch.showMergePreview(incoming);
@@ -15753,7 +15791,7 @@ SCKR.fahrtenbuch.showMergePreview = function(incoming) {
     if(exactDup) return {trip:t, status:"duplikat", match:exactDup};
     // Similar: same date + similar km (within 0.5km)
     var similar = existing.find(function(e){
-      return e.date === t.date && Math.abs((e.km||0)-(t.km||0)) < 0.5;
+      return e.date === t.date && Math.abs(SCKR.fahrtenbuch.tripKm(e)-SCKR.fahrtenbuch.tripKm(t)) < 0.5;
     });
     if(similar) return {trip:t, status:"aehnlich", match:similar};
     return {trip:t, status:"neu"};
@@ -15863,13 +15901,11 @@ SCKR.fahrtenbuch.executeMerge = async function(results) {
       });
       await SCKR.core.storage.set("profile", _p);
     }
-    if(_meta.branding && SCKR.admin && SCKR.admin.state){ SCKR.admin.state.branding = _meta.branding; await SCKR.core.storage.set("admin_branding", _meta.branding); }
-    if(_meta.sponsors && SCKR.admin && SCKR.admin.state){ SCKR.admin.state.sponsors = _meta.sponsors; await SCKR.core.storage.set("admin_sponsors", _meta.sponsors); }
   }
   SCKR.fahrtenbuch._importMeta = null;
 
   SCKR.core.ui.closeSheet();
-  await SCKR.fahrtenbuch.loadTrips();
+  try { st.trips.sort(function(a,b){return new Date(b.date)-new Date(a.date);}); SCKR.fahrtenbuch.render.trips(); SCKR.fahrtenbuch.render.stats(); } catch(e) {}
   SCKR.core.goto("trips");
 
   var msg = added+" importiert";

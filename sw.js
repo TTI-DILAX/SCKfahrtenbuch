@@ -1,33 +1,73 @@
-// SCKR Suite Service Worker - Offline Map Tile Cache
-var CACHE = 'sckr-tiles-v1';
+// SCKR Fahrtenbuch Service Worker
+// 1) App-Start offline: index.html wird zwischengespeichert.
+//    Seitenaufrufe: zuerst Netz (max. 4 s, damit Updates sofort ankommen), sonst Cache.
+// 2) Kartenkacheln: Cache mit Obergrenze.
+var APP = 'sckr-app-v2';
+var TILES = 'sckr-tiles-v1';
 var TILE_HOSTS = ['tile.openstreetmap.org', 'basemaps.cartocdn.com'];
+var TILE_MAX = 3000;
+var SHELL = ['./', './index.html'];
 
 self.addEventListener('install', function(e) {
-  self.skipWaiting();
+  e.waitUntil(
+    caches.open(APP).then(function(c) {
+      return Promise.all(SHELL.map(function(u) { return c.add(u).catch(function() {}); }));
+    }).then(function() { return self.skipWaiting(); })
+  );
 });
 
 self.addEventListener('activate', function(e) {
   e.waitUntil(
     caches.keys().then(function(keys) {
-      return Promise.all(keys.filter(function(k){ return k !== CACHE; }).map(function(k){ return caches.delete(k); }));
-    })
+      return Promise.all(keys.filter(function(k) { return k !== APP && k !== TILES; }).map(function(k) { return caches.delete(k); }));
+    }).then(function() { return self.clients.claim(); })
   );
 });
 
+function timeout(ms) { return new Promise(function(_, rej) { setTimeout(function() { rej(new Error('timeout')); }, ms); }); }
+
+function trimTiles(cache) {
+  return cache.keys().then(function(keys) {
+    if (keys.length <= TILE_MAX) return;
+    return Promise.all(keys.slice(0, keys.length - TILE_MAX).map(function(k) { return cache.delete(k); }));
+  });
+}
+
 self.addEventListener('fetch', function(e) {
-  var url = e.request.url;
-  var isTile = TILE_HOSTS.some(function(h){ return url.indexOf(h) > -1; });
-  if(isTile) {
+  var req = e.request;
+  if (req.method !== 'GET') return;
+  var url = req.url;
+
+  // App-Seite: Netz zuerst, Cache als Rückfall
+  if (req.mode === 'navigate') {
     e.respondWith(
-      caches.open(CACHE).then(function(cache) {
-        return cache.match(e.request).then(function(cached) {
-          if(cached) return cached;
-          return fetch(e.request.clone()).then(function(response) {
-            if(response.ok) cache.put(e.request, response.clone());
-            return response;
-          }).catch(function() {
-            return new Response('', {status: 404});
+      Promise.race([fetch(req), timeout(4000)]).then(function(res) {
+        if (res && res.ok) {
+          var copy = res.clone();
+          caches.open(APP).then(function(c) { c.put('./index.html', copy); });
+        }
+        return res;
+      }).catch(function() {
+        return caches.open(APP).then(function(c) {
+          return c.match('./index.html').then(function(hit) {
+            return hit || c.match('./') || fetch(req);
           });
+        });
+      })
+    );
+    return;
+  }
+
+  // Kartenkacheln: Cache zuerst
+  if (TILE_HOSTS.some(function(h) { return url.indexOf(h) > -1; })) {
+    e.respondWith(
+      caches.open(TILES).then(function(cache) {
+        return cache.match(req).then(function(cached) {
+          if (cached) return cached;
+          return fetch(req.clone()).then(function(response) {
+            if (response.ok) { cache.put(req, response.clone()).then(function() { return trimTiles(cache); }); }
+            return response;
+          }).catch(function() { return new Response('', { status: 404 }); });
         });
       })
     );

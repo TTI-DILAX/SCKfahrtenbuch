@@ -7,7 +7,7 @@
     "build:www": "node scripts/build-www.mjs",
     "android:sync": "node scripts/build-www.mjs && npx cap sync android",
     "android:prepare": "node scripts/prepare-android.mjs",
-    "test": "node scripts/test-gps-bridge.mjs && node scripts/test-season.mjs"
+    "test": "node scripts/check-syntax.mjs && node scripts/test-gps-bridge.mjs && node scripts/test-season.mjs"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "1.3.1",
