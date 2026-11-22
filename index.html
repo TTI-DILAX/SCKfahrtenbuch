@@ -11466,36 +11466,110 @@ window.SCKR = {
    CORE MODULE - Basis fuer alle Module
    ═══════════════════════════════════════════════════ */
 
-SCKR.core.storage = {
-  async get(k) {
-    try {
-      if (window.storage) {
-        var r = await window.storage.get(k, false);
-        return r ? JSON.parse(r.value) : null;
-      }
-      var v = localStorage.getItem("sckr_" + k);
-      return v ? JSON.parse(v) : null;
-    } catch(e) { return null; }
-  },
-  async set(k, v) {
-    try {
-      if (window.storage) return await window.storage.set(k, JSON.stringify(v), false);
-      localStorage.setItem("sckr_" + k, JSON.stringify(v));
-    } catch(e) {}
-  },
-  async del(k) {
-    try {
-      if (window.storage) return await window.storage.delete(k, false);
-      localStorage.removeItem("sckr_" + k);
-    } catch(e) {}
-  },
-  async list(prefix) {
-    try {
-      if (window.storage) { var r = await window.storage.list(prefix, false); return (r && r.keys) || []; }
-      return Object.keys(localStorage).filter(function(k){ return k.indexOf("sckr_" + prefix) === 0; }).map(function(k){ return k.slice(5); });
-    } catch(e) { return []; }
+// Speicher: IndexedDB (groß, robust) als Hauptspeicher.
+// localStorage (ca. 5 MB) lief nach wenigen GPS-Fahrten voll und verlor Fahrten still.
+// Bestandsschutz für Tester: localStorage wird NIE gelöscht, sondern bleibt als
+// Spiegel (best effort) erhalten -> eine ältere App-Version findet ihre Daten weiter.
+// Beim Start werden Einträge, die nur in localStorage stehen, nach IndexedDB übernommen.
+// Theme/Farben bleiben bewusst nur in localStorage (werden synchron beim Start gelesen).
+SCKR.core.storage = (function() {
+  var DB = "sckr", STORE = "kv", LS = "sckr_";
+  var KEEP_IN_LS = /^sckr_(theme|color_)/;
+  var NO_MIRROR = /^liveSession$/;   // groß + häufig geschrieben -> nicht spiegeln
+  var db = null, mode = "ls", lastWarn = 0;
+
+  function warn(e) {
+    try { console.error("[storage]", e); } catch(_) {}
+    var now = Date.now(); if (now - lastWarn < 8000) return; lastWarn = now;
+    try { SCKR.core.ui.toast("⚠ SPEICHERN FEHLGESCHLAGEN – Speicher voll? Bitte Backup erstellen!"); } catch(_) {}
   }
-};
+  function req(r) { return new Promise(function(res, rej) { r.onsuccess = function() { res(r.result); }; r.onerror = function() { rej(r.error); }; }); }
+  function tx(m) { return db.transaction(STORE, m).objectStore(STORE); }
+  function txDone(t) { return new Promise(function(res, rej) { t.oncomplete = function() { res(); }; t.onerror = function() { rej(t.error); }; t.onabort = function() { rej(t.error || new Error("abort")); }; }); }
+
+  function open() {
+    return new Promise(function(res, rej) {
+      if (!window.indexedDB) return rej(new Error("no indexedDB"));
+      var r; try { r = indexedDB.open(DB, 1); } catch(e) { return rej(e); }
+      r.onupgradeneeded = function() { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
+      r.onsuccess = function() { res(r.result); };
+      r.onerror = function() { rej(r.error); };
+      r.onblocked = function() { rej(new Error("blocked")); };
+    });
+  }
+  // Übernahme localStorage -> IndexedDB bei jedem Start: nur Schlüssel, die in IndexedDB fehlen.
+  // Nichts wird überschrieben, nichts in localStorage gelöscht.
+  async function migrate() {
+    var have = {}; (await req(tx("readonly").getAllKeys())).forEach(function(k) { have[k] = true; });
+    var t = db.transaction(STORE, "readwrite"), s = t.objectStore(STORE), n = 0;
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (!k || k.indexOf(LS) !== 0 || KEEP_IN_LS.test(k)) continue;
+      var key = k.slice(LS.length); if (have[key]) continue;
+      var v; try { v = JSON.parse(localStorage.getItem(k)); } catch(e) { continue; }
+      s.put(v, key); n++;
+    }
+    if (!have["__migrated_ls"]) s.put(new Date().toISOString(), "__migrated_ls");
+    await txDone(t);
+    if (n) { try { console.info("[storage] " + n + " Eintr\u00E4ge aus localStorage \u00FCbernommen"); } catch(_) {} }
+  }
+  // Spiegel nur für kleine Einträge (< 100 KB), damit localStorage nicht vollläuft
+  // (Theme/Farben brauchen dort weiter Platz). Große GPS-Fahrten liegen nur in IndexedDB.
+  function mirrorSet(k, v) {
+    if (NO_MIRROR.test(k)) return;
+    try { var j = JSON.stringify(v); if (j.length > 100000) return;   // vorhandene alte Kopie bleibt unangetastet localStorage.setItem(LS + k, j); }
+    catch(e) { /* voll: egal, IndexedDB ist maßgeblich */ }
+  }
+  function mirrorDel(k) { try { localStorage.removeItem(LS + k); } catch(e) {} }
+  var ready = (async function() {
+    if (window.storage) { mode = "host"; return; }
+    try { db = await open(); await migrate(); mode = "idb"; }
+    catch(e) { db = null; mode = "ls"; try { console.warn("[storage] IndexedDB nicht verfügbar, nutze localStorage", e); } catch(_) {} }
+  })();
+
+  return {
+    ready: ready,
+    mode: function() { return mode; },
+    async get(k) {
+      await ready;
+      try {
+        if (mode === "host") { var r = await window.storage.get(k, false); return r ? JSON.parse(r.value) : null; }
+        if (mode === "idb") { var v = await req(tx("readonly").get(k)); return v === undefined ? null : v; }
+        var s = localStorage.getItem(LS + k); return s ? JSON.parse(s) : null;
+      } catch(e) { return null; }
+    },
+    // gibt true/false zurück; Fehler werden sichtbar gemeldet statt verschluckt
+    async set(k, v) {
+      await ready;
+      try {
+        if (mode === "host") { await window.storage.set(k, JSON.stringify(v), false); return true; }
+        if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).put(JSON.parse(JSON.stringify(v === undefined ? null : v)), k); await txDone(t); mirrorSet(k, v); return true; }
+        localStorage.setItem(LS + k, JSON.stringify(v)); return true;
+      } catch(e) { warn(e); return false; }
+    },
+    async del(k) {
+      await ready;
+      try {
+        if (mode === "host") { await window.storage.delete(k, false); return true; }
+        if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).delete(k); await txDone(t); mirrorDel(k); return true; }
+        localStorage.removeItem(LS + k); return true;
+      } catch(e) { return false; }
+    },
+    async list(prefix) {
+      await ready;
+      try {
+        if (mode === "host") { var r = await window.storage.list(prefix, false); return (r && r.keys) || []; }
+        if (mode === "idb") { var ks = await req(tx("readonly").getAllKeys()); return ks.filter(function(k) { return typeof k === "string" && k.indexOf(prefix) === 0; }); }
+        return Object.keys(localStorage).filter(function(k) { return k.indexOf(LS + prefix) === 0; }).map(function(k) { return k.slice(LS.length); });
+      } catch(e) { return []; }
+    },
+    // Für "Alle Daten löschen"
+    async clearAll() {
+      await ready;
+      try { if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).clear(); await txDone(t); } } catch(e) {}
+    }
+  };
+})();
 
 // Event Bus - Module kommunizieren hierueber
 SCKR.core.events = {
@@ -11706,7 +11780,7 @@ SCKR.admin.toggleTheme = function() {
 
 SCKR.admin.setTheme = function(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("sckr_theme", theme);
+  try { localStorage.setItem("sckr_theme", theme); } catch(e) {}
   var btn = document.getElementById("theme-btn");
   if(btn) btn.innerHTML = theme === "dark" ? "☀︎" : "☽︎";
 };
@@ -12105,7 +12179,7 @@ SCKR.legal.deleteAllData = function(){
   if(!confirm("Wirklich ALLE Daten unwiderruflich l\u00F6schen? (T\u00F6rns, Boote, Einstellungen)")) return;
   if(!confirm("Letzte Warnung: Das kann nicht r\u00FCckg\u00E4ngig gemacht werden.")) return;
   try { var keys=[]; for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k && k.indexOf("sckr_")===0) keys.push(k); } keys.forEach(function(k){ localStorage.removeItem(k); }); } catch(e){}
-  try { location.reload(); } catch(e){}
+  Promise.resolve(SCKR.core.storage.clearAll && SCKR.core.storage.clearAll()).then(function(){ try { location.reload(); } catch(e){} });
 };
 
 /* ════════════ WHITE-LABEL: SETUP-ASSISTENT + KONFIG-TEILEN (Weg 1, lokal) ════════════ */
