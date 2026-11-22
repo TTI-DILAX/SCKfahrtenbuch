@@ -41,7 +41,7 @@ self.addEventListener('fetch', function(e) {
   // App-Seite: Netz zuerst, Cache als Rückfall
   if (req.mode === 'navigate') {
     e.respondWith(
-      Promise.race([fetch(req), timeout(4000)]).then(function(res) {
+      Promise.race([fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }), timeout(4000)]).then(function(res) {
         if (res && res.ok) {
           var copy = res.clone();
           caches.open(APP).then(function(c) { c.put('./index.html', copy); });
@@ -49,9 +49,9 @@ self.addEventListener('fetch', function(e) {
         return res;
       }).catch(function() {
         return caches.open(APP).then(function(c) {
-          return c.match('./index.html').then(function(hit) {
-            return hit || c.match('./') || fetch(req);
-          });
+          return c.match('./index.html')
+            .then(function(hit) { return hit || c.match('./'); })
+            .then(function(hit) { return hit || fetch(req); });
         });
       })
     );

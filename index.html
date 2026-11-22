@@ -11468,23 +11468,28 @@ window.SCKR = {
 
 // Speicher: IndexedDB (groß, robust) als Hauptspeicher.
 // localStorage (ca. 5 MB) lief nach wenigen GPS-Fahrten voll und verlor Fahrten still.
-// Bestandsschutz für Tester: localStorage wird NIE gelöscht, sondern bleibt als
-// Spiegel (best effort) erhalten -> eine ältere App-Version findet ihre Daten weiter.
-// Beim Start werden Einträge, die nur in localStorage stehen, nach IndexedDB übernommen.
+// Bestandsschutz für Tester:
+//  - localStorage wird NIE gelöscht, sondern dient als Spiegel (best effort).
+//    Große GPS-Fahrten werden ohne Trackpunkte gespiegelt (Strecke/Punkte bleiben sichtbar).
+//  - Beim Start werden Änderungen übernommen, die eine ältere App-Version in localStorage
+//    gemacht hat (neue, geänderte und gelöschte Einträge) -> Hin- und Herwechseln ist sicher.
+//  - Fällt IndexedDB aus (z. B. iOS "Connection lost"), wird neu verbunden bzw. aus
+//    localStorage gelesen.
 // Theme/Farben bleiben bewusst nur in localStorage (werden synchron beim Start gelesen).
 SCKR.core.storage = (function() {
-  var DB = "sckr", STORE = "kv", LS = "sckr_";
+  var DB = "sckr", STORE = "kv", LS = "sckr_", MK = "__m:";
   var KEEP_IN_LS = /^sckr_(theme|color_)/;
   var NO_MIRROR = /^liveSession$/;   // groß + häufig geschrieben -> nicht spiegeln
+  var MIRROR_MAX = 100000;
   var db = null, mode = "ls", lastWarn = 0;
 
-  function warn(e) {
-    try { console.error("[storage]", e); } catch(_) {}
+  function toast(msg) {
     var now = Date.now(); if (now - lastWarn < 8000) return; lastWarn = now;
-    try { SCKR.core.ui.toast("⚠ SPEICHERN FEHLGESCHLAGEN – Speicher voll? Bitte Backup erstellen!"); } catch(_) {}
+    try { SCKR.core.ui.toast(msg); } catch(_) {}
   }
+  function warn(e) { try { console.error("[storage]", e); } catch(_) {} toast("⚠ SPEICHERN FEHLGESCHLAGEN – Speicher voll? Bitte Backup erstellen!"); }
+  function hash(str) { var h = 5381, i = str.length; while (i) h = (h * 33) ^ str.charCodeAt(--i); return (h >>> 0).toString(36) + "." + str.length; }
   function req(r) { return new Promise(function(res, rej) { r.onsuccess = function() { res(r.result); }; r.onerror = function() { rej(r.error); }; }); }
-  function tx(m) { return db.transaction(STORE, m).objectStore(STORE); }
   function txDone(t) { return new Promise(function(res, rej) { t.oncomplete = function() { res(); }; t.onerror = function() { rej(t.error); }; t.onabort = function() { rej(t.error || new Error("abort")); }; }); }
 
   function open() {
@@ -11492,58 +11497,106 @@ SCKR.core.storage = (function() {
       if (!window.indexedDB) return rej(new Error("no indexedDB"));
       var r; try { r = indexedDB.open(DB, 1); } catch(e) { return rej(e); }
       r.onupgradeneeded = function() { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
-      r.onsuccess = function() { res(r.result); };
+      r.onsuccess = function() {
+        var d = r.result;
+        d.onversionchange = function() { try { d.close(); } catch(_) {} db = null; };
+        d.onclose = function() { db = null; };
+        res(d);
+      };
       r.onerror = function() { rej(r.error); };
       r.onblocked = function() { rej(new Error("blocked")); };
     });
   }
-  // Übernahme localStorage -> IndexedDB bei jedem Start: nur Schlüssel, die in IndexedDB fehlen.
-  // Nichts wird überschrieben, nichts in localStorage gelöscht.
-  async function migrate() {
-    var have = {}; (await req(tx("readonly").getAllKeys())).forEach(function(k) { have[k] = true; });
-    var t = db.transaction(STORE, "readwrite"), s = t.objectStore(STORE), n = 0;
-    for (var i = 0; i < localStorage.length; i++) {
-      var k = localStorage.key(i);
-      if (!k || k.indexOf(LS) !== 0 || KEEP_IN_LS.test(k)) continue;
-      var key = k.slice(LS.length); if (have[key]) continue;
-      var v; try { v = JSON.parse(localStorage.getItem(k)); } catch(e) { continue; }
-      s.put(v, key); n++;
+  // Führt eine IndexedDB-Aktion aus; bei Verbindungsabbruch einmal neu verbinden
+  async function withDb(fn) {
+    try { if (!db) db = await open(); return await fn(db); }
+    catch(e) { db = null; db = await open(); return await fn(db); }
+  }
+
+  // Spiegel-Wert: kleine Einträge vollständig, große Fahrten ohne Trackpunkte
+  function mirrorValue(v) {
+    var j = JSON.stringify(v);
+    if (j.length <= MIRROR_MAX) return j;
+    if (v && typeof v === "object" && Array.isArray(v.trackPoints)) {
+      var c = Object.assign({}, v); c.trackPoints = []; c._mirrorStripped = true;
+      j = JSON.stringify(c); if (j.length <= MIRROR_MAX) return j;
     }
-    if (!have["__migrated_ls"]) s.put(new Date().toISOString(), "__migrated_ls");
-    await txDone(t);
-    if (n) { try { console.info("[storage] " + n + " Eintr\u00E4ge aus localStorage \u00FCbernommen"); } catch(_) {} }
+    return null;
   }
-  // Spiegel nur für kleine Einträge (< 100 KB), damit localStorage nicht vollläuft
-  // (Theme/Farben brauchen dort weiter Platz). Große GPS-Fahrten liegen nur in IndexedDB.
+  // schreibt localStorage-Spiegel, gibt den Hash des gespiegelten Werts zurück (oder null)
   function mirrorSet(k, v) {
-    if (NO_MIRROR.test(k)) return;
-    try { var j = JSON.stringify(v); if (j.length > 100000) return; /* vorhandene alte Kopie bleibt unangetastet */ localStorage.setItem(LS + k, j); }
-    catch(e) { /* voll: egal, IndexedDB ist maßgeblich */ }
+    if (NO_MIRROR.test(k)) return null;
+    try { var j = mirrorValue(v); if (j === null) return null; localStorage.setItem(LS + k, j); return hash(j); }
+    catch(e) { return null; /* voll: egal, IndexedDB ist maßgeblich */ }
   }
-  function mirrorDel(k) { try { localStorage.removeItem(LS + k); } catch(e) {} }
+
+  // Abgleich localStorage -> IndexedDB bei jedem Start
+  async function sync() {
+    var all = await withDb(function(d) {
+      var s = d.transaction(STORE, "readonly").objectStore(STORE);
+      return Promise.all([req(s.getAllKeys()), req(s.getAll())]);
+    });
+    var keys = all[0], vals = all[1], idb = {}, marks = {};
+    keys.forEach(function(k, i) { if (typeof k === "string" && k.indexOf(MK) === 0) marks[k.slice(MK.length)] = vals[i]; else idb[k] = vals[i]; });
+    var puts = [], dels = [];
+    var seen = {};
+    for (var i = 0; i < localStorage.length; i++) {
+      var lk = localStorage.key(i);
+      if (!lk || lk.indexOf(LS) !== 0 || KEEP_IN_LS.test(lk)) continue;
+      var key = lk.slice(LS.length), raw = localStorage.getItem(lk); seen[key] = true;
+      var v; try { v = JSON.parse(raw); } catch(e) { continue; }
+      if (!(key in idb)) { puts.push([key, v, hash(raw)]); continue; }      // nur in localStorage (alte Version / Erstübernahme)
+      if (marks[key] && marks[key] !== hash(raw)) {                          // von älterer Version geändert -> localStorage gewinnt
+        var cur = idb[key];
+        if (v && typeof v === "object" && v._mirrorStripped && cur && Array.isArray(cur.trackPoints)) { v.trackPoints = cur.trackPoints; delete v._mirrorStripped; }
+        puts.push([key, v, hash(raw)]);
+      }
+    }
+    Object.keys(marks).forEach(function(key) { if (!seen[key] && (key in idb)) dels.push(key); });   // von älterer Version gelöscht
+    if (!puts.length && !dels.length && ("__migrated_ls" in idb)) return;
+    await withDb(function(d) {
+      var t = d.transaction(STORE, "readwrite"), s = t.objectStore(STORE);
+      puts.forEach(function(p) { s.put(p[1], p[0]); s.put(p[2], MK + p[0]); });
+      dels.forEach(function(k) { s.delete(k); s.delete(MK + k); });
+      if (!("__migrated_ls" in idb)) s.put(new Date().toISOString(), "__migrated_ls");
+      return txDone(t);
+    });
+    if (puts.length || dels.length) { try { console.info("[storage] Abgleich mit localStorage: " + puts.length + " übernommen, " + dels.length + " gelöscht"); } catch(_) {} }
+  }
+
   var ready = (async function() {
     if (window.storage) { mode = "host"; return; }
-    try { db = await open(); await migrate(); mode = "idb"; }
-    catch(e) { db = null; mode = "ls"; try { console.warn("[storage] IndexedDB nicht verfügbar, nutze localStorage", e); } catch(_) {} }
+    try { db = await open(); mode = "idb"; await sync(); }
+    catch(e) { if (!db) { mode = "ls"; try { console.warn("[storage] IndexedDB nicht verfügbar, nutze localStorage", e); } catch(_) {} } }
   })();
+
+  function lsGet(k) { try { var s = localStorage.getItem(LS + k); return s ? JSON.parse(s) : null; } catch(e) { return null; } }
+  function lsList(prefix) { try { return Object.keys(localStorage).filter(function(k) { return k.indexOf(LS + prefix) === 0; }).map(function(k) { return k.slice(LS.length); }); } catch(e) { return []; } }
 
   return {
     ready: ready,
     mode: function() { return mode; },
     async get(k) {
       await ready;
-      try {
-        if (mode === "host") { var r = await window.storage.get(k, false); return r ? JSON.parse(r.value) : null; }
-        if (mode === "idb") { var v = await req(tx("readonly").get(k)); return v === undefined ? null : v; }
-        var s = localStorage.getItem(LS + k); return s ? JSON.parse(s) : null;
-      } catch(e) { return null; }
+      if (mode === "host") { try { var r = await window.storage.get(k, false); return r ? JSON.parse(r.value) : null; } catch(e) { return null; } }
+      if (mode === "idb") {
+        try { var v = await withDb(function(d) { return req(d.transaction(STORE, "readonly").objectStore(STORE).get(k)); }); return v === undefined ? null : v; }
+        catch(e) { toast("⚠ SPEICHER-PROBLEM – bitte App neu starten"); return lsGet(k); }
+      }
+      return lsGet(k);
     },
     // gibt true/false zurück; Fehler werden sichtbar gemeldet statt verschluckt
     async set(k, v) {
       await ready;
       try {
         if (mode === "host") { await window.storage.set(k, JSON.stringify(v), false); return true; }
-        if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).put(JSON.parse(JSON.stringify(v === undefined ? null : v)), k); await txDone(t); mirrorSet(k, v); return true; }
+        if (mode === "idb") {
+          var val = JSON.parse(JSON.stringify(v === undefined ? null : v));
+          await withDb(function(d) { var t = d.transaction(STORE, "readwrite"); t.objectStore(STORE).put(val, k); return txDone(t); });
+          var h = mirrorSet(k, val);
+          withDb(function(d) { var t = d.transaction(STORE, "readwrite"), s = t.objectStore(STORE); if (h) s.put(h, MK + k); else s.delete(MK + k); return txDone(t); }).catch(function(){});
+          return true;
+        }
         localStorage.setItem(LS + k, JSON.stringify(v)); return true;
       } catch(e) { warn(e); return false; }
     },
@@ -11551,22 +11604,27 @@ SCKR.core.storage = (function() {
       await ready;
       try {
         if (mode === "host") { await window.storage.delete(k, false); return true; }
-        if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).delete(k); await txDone(t); mirrorDel(k); return true; }
+        if (mode === "idb") {
+          await withDb(function(d) { var t = d.transaction(STORE, "readwrite"), s = t.objectStore(STORE); s.delete(k); s.delete(MK + k); return txDone(t); });
+          try { localStorage.removeItem(LS + k); } catch(e) {}
+          return true;
+        }
         localStorage.removeItem(LS + k); return true;
       } catch(e) { return false; }
     },
     async list(prefix) {
       await ready;
-      try {
-        if (mode === "host") { var r = await window.storage.list(prefix, false); return (r && r.keys) || []; }
-        if (mode === "idb") { var ks = await req(tx("readonly").getAllKeys()); return ks.filter(function(k) { return typeof k === "string" && k.indexOf(prefix) === 0; }); }
-        return Object.keys(localStorage).filter(function(k) { return k.indexOf(LS + prefix) === 0; }).map(function(k) { return k.slice(LS.length); });
-      } catch(e) { return []; }
+      if (mode === "host") { try { var r = await window.storage.list(prefix, false); return (r && r.keys) || []; } catch(e) { return []; } }
+      if (mode === "idb") {
+        try { var ks = await withDb(function(d) { return req(d.transaction(STORE, "readonly").objectStore(STORE).getAllKeys()); }); return ks.filter(function(k) { return typeof k === "string" && k.indexOf(prefix) === 0; }); }
+        catch(e) { toast("⚠ SPEICHER-PROBLEM – bitte App neu starten"); return lsList(prefix); }
+      }
+      return lsList(prefix);
     },
     // Für "Alle Daten löschen"
     async clearAll() {
       await ready;
-      try { if (mode === "idb") { var t = db.transaction(STORE, "readwrite"); t.objectStore(STORE).clear(); await txDone(t); } } catch(e) {}
+      try { if (mode === "idb") await withDb(function(d) { var t = d.transaction(STORE, "readwrite"); t.objectStore(STORE).clear(); return txDone(t); }); } catch(e) {}
     }
   };
 })();
@@ -11618,15 +11676,18 @@ SCKR.core.ui = {
   },
   closeSheet: function() {
     document.getElementById("sheet-bg").classList.remove("open");
-    // "+ NEU" geöffnet, aber nicht gespeichert -> Phantom-Eintrag wieder entfernen
-    try {
-      var st = SCKR.fahrtenbuch && SCKR.fahrtenbuch.state;
-      // nur wenn gerade der Fahrt-Editor offen ist (nicht bei Unter-Dialogen)
-      if (st && st.trips && document.getElementById("dt-date") && st.trips.some(function(t){ return t._unsaved; })) {
-        st.trips = st.trips.filter(function(t){ return !t._unsaved; });
-        if (SCKR.core.currentTab === "trips") SCKR.fahrtenbuch.render.trips();
-      }
-    } catch(e) {}
+    // "+ NEU" geöffnet, aber nicht gespeichert -> Phantom-Eintrag entfernen, sobald kein
+    // Dialog mehr offen ist (kurz warten, falls ein Unter-Dialog direkt den Editor wieder öffnet)
+    setTimeout(function() {
+      try {
+        if (document.getElementById("sheet-bg").classList.contains("open")) return;
+        var st = SCKR.fahrtenbuch && SCKR.fahrtenbuch.state;
+        if (st && st.trips && st.trips.some(function(t){ return t._unsaved; })) {
+          st.trips = st.trips.filter(function(t){ return !t._unsaved; });
+          if (SCKR.core.currentTab === "trips") SCKR.fahrtenbuch.render.trips();
+        }
+      } catch(e) {}
+    }, 400);
   },
   promptLogoUpload: function() {
     if(!SCKR.admin.isUnlocked()) { SCKR.core.ui.toast("NUR ADMIN KANN LOGO AENDERN"); return; }
@@ -12593,6 +12654,8 @@ SCKR.fahrtenbuch.undoSeasonClose = async function(y) {
   st.seasonClose = sc;
   var arch = st._seasonArchive || {};
   if(arch[y] && arch[y].source === "abgabe") { delete arch[y]; try { await SCKR.core.storage.set("seasonArchive", arch); } catch(e){} }
+  // manuelle Saison-Zuordnungen dieses Jahres zurücksetzen
+  for (var _i = 0; _i < st.trips.length; _i++) { var _t = st.trips[_i]; if (_t.seasonYear && String(_t.date||"").slice(0,4) === y) { delete _t.seasonYear; await SCKR.core.storage.set("trip:"+_t.id, _t); } }
   try { await SCKR.core.storage.set("seasonState", {trackedYear: y}); } catch(e){}
   SCKR.core.ui.toast("ABGABE "+y+" ZUR\u00DCCKGENOMMEN");
   SCKR.fahrtenbuch._rerenderSeasonViews();
@@ -15755,7 +15818,13 @@ SCKR.fahrtenbuch._importSeasonClose = function(inc) {
 };
 
 // ── Import absichern: Texte entschärfen, IDs/Datum/Zahlen prüfen ──
-SCKR.fahrtenbuch._cleanStr = function(v) { return String(v).replace(/</g,"\u2039").replace(/>/g,"\u203A").replace(/"/g,"\u201D").replace(/'/g,"\u2019").replace(/`/g,"\u2019").slice(0,5000); };
+// Nur spitze Klammern werden ersetzt (kein HTML möglich); Anführungszeichen/Umlaute bleiben.
+// Bilder (data:image/...) bleiben unverändert und ungekürzt.
+SCKR.fahrtenbuch._cleanStr = function(v) {
+  v = String(v);
+  if (/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(v)) return v;
+  return v.replace(/</g,"\u2039").replace(/>/g,"\u203A").slice(0,20000);
+};
 SCKR.fahrtenbuch._cleanObj = function(o, depth) {
   depth = depth||0; if(depth>4) return null;
   if(Array.isArray(o)) return o.map(function(x){ return SCKR.fahrtenbuch._cleanObj(x, depth+1); });
@@ -15773,9 +15842,11 @@ SCKR.fahrtenbuch._sanitizeImport = function(list, isBoat) {
     y = SCKR.fahrtenbuch._cleanObj(y);
     y.trackPoints = Array.isArray(pts) ? pts.filter(function(p){ return p && isFinite(+p.lat) && isFinite(+p.lng); }) : [];
     if(!/^[\w-]{1,64}$/.test(String(y.id||""))) y.id = SCKR.core.util.uuid();
-    NUM.forEach(function(k){ if(y[k]!==undefined){ var n=+y[k]; y[k]=isFinite(n)?n:0; } });
+    NUM.forEach(function(k){ if(y[k]!==undefined){ var n=+String(y[k]).replace(",","."); y[k]=isFinite(n)?n:0; } });
     if(isBoat) { delete y.trackPoints; return y; }
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(y.date||""))) return null;
+    var _d = String(y.date||"").slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(_d)) return null;
+    y.date = _d;
     return y;
   }).filter(Boolean);
 };
@@ -15790,7 +15861,7 @@ SCKR.fahrtenbuch.importJSON = function(input) {
     if(_skippedBad > 0) SCKR.core.ui.toast(_skippedBad+" UNG\u00DCLTIGE FAHRT(EN) \u00DCBERSPRUNGEN");
     // Branding/Sponsoren werden aus Sicherheitsgründen NICHT importiert (nur über Admin änderbar)
     SCKR.fahrtenbuch._importMeta = {boats:SCKR.fahrtenbuch._sanitizeImport(Array.isArray(data.boats) ? data.boats : [], true), profile:(data.profile && typeof data.profile==="object") ? SCKR.fahrtenbuch._cleanObj(data.profile) : null};
-    SCKR.fahrtenbuch._importSeasonClose(data.seasonClose);
+    SCKR.fahrtenbuch._importSeasonCloseData = data.seasonClose;   // wird erst beim Zusammenführen übernommen
     if(incoming.length === 0) { SCKR.core.ui.toast("KEINE FAHRTEN IN DATEI"); return; }
     SCKR.fahrtenbuch.showMergePreview(incoming);
   }).catch(function(e){ SCKR.core.ui.toast("IMPORT-FEHLER: "+e.message); });
@@ -15847,7 +15918,7 @@ SCKR.fahrtenbuch.showMergePreview = function(incoming) {
       + '<input type="checkbox" id="merge-cb-'+i+'" '+(checked?"checked":"")+' style="width:18px;height:18px;accent-color:var(--acc);flex-shrink:0">'
       + '<div style="flex:1;min-width:0">'
       + '<div style="font-size:13px;font-weight:600;color:var(--wh)">'+esc(t.date||"")+'&nbsp;&nbsp;'+esc(t.boat||"")+'</div>'
-      + '<div style="font-size:11px;color:var(--mut)">'+(t.km||0).toFixed(2)+' km &mdash; '+(t.points||0)+' Pkt'
+      + '<div style="font-size:11px;color:var(--mut)">'+SCKR.fahrtenbuch.tripKm(t).toFixed(1)+' km &mdash; '+Math.round(SCKR.fahrtenbuch.points.trip(t))+' Pkt'
       + (r.match ? ' &mdash; <em>'+esc(r.status==="duplikat"?"Gleiche ID":"Aehnliche Fahrt am "+r.match.date)+'</em>' : '')
       + '</div></div>'
       + '<span style="font-family:var(--fd);font-size:10px;font-weight:800;padding:2px 7px;border-radius:3px;background:'+statusColor+'22;color:'+statusColor+'">'+statusLabel+'</span>'
@@ -15921,6 +15992,7 @@ SCKR.fahrtenbuch.executeMerge = async function(results) {
     }
   }
   SCKR.fahrtenbuch._importMeta = null;
+  SCKR.fahrtenbuch._importSeasonClose(SCKR.fahrtenbuch._importSeasonCloseData); SCKR.fahrtenbuch._importSeasonCloseData = null;
 
   SCKR.core.ui.closeSheet();
   try { st.trips.sort(function(a,b){return new Date(b.date)-new Date(a.date);}); SCKR.fahrtenbuch.render.trips(); SCKR.fahrtenbuch.render.stats(); } catch(e) {}
@@ -16020,8 +16092,9 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     var exSeason = (st.filterYear && st.filterYear!=="all") ? st.filterYear : SCKR.fahrtenbuch.currentSeason();
     var seasonTrips = st.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===exSeason; });
     if(seasonTrips.length === 0) {
-      var _lastClosed = String(+exSeason - 1);
-      if((st.seasonClose||{})[_lastClosed]) { exSeason = _lastClosed; seasonTrips = st.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===exSeason; }); }
+      // z. B. im Januar ohne Fahrten: neueste Saison mit Fahrten nehmen
+      var _all = st.trips.map(function(t){ return SCKR.fahrtenbuch.tripSeason(t); }).filter(Boolean).sort();
+      if(_all.length) { exSeason = _all[_all.length-1]; seasonTrips = st.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===exSeason; }); }
     }
     var sorted = seasonTrips.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
     if(sorted.length > 50) SCKR.core.ui.toast("HINWEIS: NUR DIE ERSTEN 50 VON "+sorted.length+" FAHRTEN PASSEN INS FORMULAR");
@@ -16073,7 +16146,7 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     a.download = "Fahrtenbuch_SCKR_Saison_"+exSeason+"_"+new Date().toISOString().slice(0,10)+".xlsx";
     a.click();
     URL.revokeObjectURL(url);
-    SCKR.core.ui.toast("EXCEL SAISON "+exSeason+" HERUNTERGELADEN");
+    SCKR.core.ui.toast("EXCEL SAISON "+exSeason+" HERUNTERGELADEN \u2013 andere Saison: im Punkte-Tab ausw\u00E4hlen", 5000);
   } catch(e) { SCKR.core.ui.toast("EXCEL-FEHLER: "+e.message); }
 };
 
