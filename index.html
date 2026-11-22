@@ -11618,6 +11618,15 @@ SCKR.core.ui = {
   },
   closeSheet: function() {
     document.getElementById("sheet-bg").classList.remove("open");
+    // "+ NEU" geöffnet, aber nicht gespeichert -> Phantom-Eintrag wieder entfernen
+    try {
+      var st = SCKR.fahrtenbuch && SCKR.fahrtenbuch.state;
+      // nur wenn gerade der Fahrt-Editor offen ist (nicht bei Unter-Dialogen)
+      if (st && st.trips && document.getElementById("dt-date") && st.trips.some(function(t){ return t._unsaved; })) {
+        st.trips = st.trips.filter(function(t){ return !t._unsaved; });
+        if (SCKR.core.currentTab === "trips") SCKR.fahrtenbuch.render.trips();
+      }
+    } catch(e) {}
   },
   promptLogoUpload: function() {
     if(!SCKR.admin.isUnlocked()) { SCKR.core.ui.toast("NUR ADMIN KANN LOGO AENDERN"); return; }
@@ -12484,7 +12493,9 @@ SCKR.fahrtenbuch.points = {
     return (t.segelKm||0) || (t.sailKm||0) || (t.sailSm||0)*1.852;
   },
   sail:    function(t) { return SCKR.fahrtenbuch.points.directKm(t); },
-  motor:   function(t) { return 0.2*((t.motorKm||0) + (t.motorSm||0)*1.852); },
+  // Wie beim Segeln: km-Wert hat Vorrang, sonst sm. Vorher wurden bei Küsten-GPS-Fahrten
+  // motorKm UND motorSm (dieselbe Strecke) addiert -> doppelte Motorpunkte.
+  motor:   function(t) { return 0.2*((t.motorKm||0) || (t.motorSm||0)*1.852); },
   bridge:  function(t) { return (t.bridges||0)*2; },
   lock:    function(t) { return (t.locks||0)*4; },
   fern:    function(t) { var d=t.fernKm||0; return d<200?0:20+Math.floor((d-200)/100)*10; },
@@ -12623,7 +12634,7 @@ SCKR.fahrtenbuch.tripKm = function(t) {
 
 SCKR.fahrtenbuch.newTrip = function(p) {
   var base = {
-    id:SCKR.core.util.uuid(), date:new Date().toISOString().slice(0,10),
+    id:SCKR.core.util.uuid(), date:SCKR.fahrtenbuch._localDay(),   // lokales Datum (vorher UTC: 0–2 Uhr = Vortag)
     startTime:null, endTime:null, category:"Binnen",
     boatId:"", boatClass:"", sailNumber:"", yachtName:"",
     sailKm:0, sailSm:0, motorKm:0, motorSm:0, fernKm:0,
@@ -12712,7 +12723,7 @@ SCKR.fahrtenbuch.weather = {
     if (!navigator.geolocation) { if(cb) cb(null); return; }
     navigator.geolocation.getCurrentPosition(function(pos) {
       var lat=pos.coords.latitude, lng=pos.coords.longitude;
-      var day=new Date().toISOString().slice(0,10);
+      var day=SCKR.fahrtenbuch._localDay();
       fetch("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lng+"&hourly=precipitation,cloud_cover,wind_speed_10m,wind_direction_10m&wind_speed_unit=ms&timezone=auto&start_date="+day+"&end_date="+day)
       .then(function(r){return r.json();})
       .then(function(d){
@@ -13030,6 +13041,9 @@ SCKR.fahrtenbuch._recoverSave = function() {
 };
 
 SCKR.fahrtenbuch._recoverDiscard = function() {
+  var _snap = SCKR.fahrtenbuch.state._recoverSnap;
+  // Die Fahrt wurde schon beim Start gespeichert -> beim Verwerfen auch löschen
+  if(_snap && _snap.activeTrip && _snap.activeTrip.id) { SCKR.fahrtenbuch.deleteTrip(_snap.activeTrip.id).catch(function(){}); }
   SCKR.fahrtenbuch.state._recoverSnap = null;
   SCKR.fahrtenbuch._clearLive();
   SCKR.core.ui.closeSheet();
@@ -13137,7 +13151,7 @@ SCKR.fahrtenbuch.startTracking = async function(prefill, resume) {
     SCKR.core.ui.toast("GPS NICHT VERFUEGBAR");
   }
 
-  await SCKR.fahrtenbuch.saveTrip(trip);
+  await SCKR.fahrtenbuch.saveTrip(st.activeTrip);   // (vorher "trip": beim Fortsetzen undefined -> Absturz)
   SCKR.fahrtenbuch.render.live();
 };
 
@@ -13278,6 +13292,7 @@ SCKR.fahrtenbuch.stopTracking = async function() {
   var earnedPts = Math.round(SCKR.fahrtenbuch.points.trip(saved));
   if(earnedPts <= 0 && saved.geoAutoStart) {
     SCKR.core.ui.toast("GEOFENCE-FAHRT VERWORFEN — 0 PUNKTE (Fehlstart?)");
+    try { await SCKR.fahrtenbuch.deleteTrip(saved.id); } catch(e) {}
     SCKR.fahrtenbuch.state.geoAutoStarted = false;
     SCKR.fahrtenbuch.state._geoStartAsked = false;
     SCKR.fahrtenbuch.render.live();
@@ -14386,10 +14401,10 @@ SCKR.fahrtenbuch.render.settings = function() {
     + '<div class="lxs">' + (profileName ? esc(profileName) : 'Mein Profil') + '</div>'
     + '<h2>Profil &amp; Boote</h2></div></div>';
 
-  if(!SCKR.fahrtenbuch._isStandalone()) {
+  if(!SCKR.fahrtenbuch._isStandalone() && !(window.SCKR_GPS && SCKR_GPS.isNative && SCKR_GPS.isNative())) {
     html += '<div style="margin:10px 14px;padding:12px 14px;border-radius:12px;background:rgba(200,16,46,.12);border:1px solid rgba(200,16,46,.35)">'
       + '<div style="font-family:var(--fd);font-weight:800;font-size:13px;color:var(--acc)">ZUM HOMESCREEN HINZUFÜGEN EMPFOHLEN</div>'
-      + '<div style="font-size:12px;color:var(--off);margin-top:4px;line-height:1.5">Im Browser können Fahrten nach längerer Nichtnutzung automatisch gelöscht werden (z.B. iOS Safari nach ca. 7 Tagen). Füge die App zum Homescreen hinzu, damit deine Daten sicher bleiben.</div>'
+      + '<div style="font-size:12px;color:var(--off);margin-top:4px;line-height:1.5">Im Browser können Fahrten nach längerer Nichtnutzung automatisch gelöscht werden (z.B. iOS Safari nach ca. 7 Tagen). Füge die App zum Homescreen hinzu, damit deine Daten sicher bleiben.<br><strong>Wichtig:</strong> Die Homescreen-App hat ihren eigenen Speicher. Erstelle vorher hier ein Backup (Profil &rarr; Backup) und importiere es danach in der Homescreen-App.</div>'
       + '</div>';
   }
 
@@ -14488,6 +14503,7 @@ SCKR.fahrtenbuch.saveDetail = async function() {
   t.sailNumber = (document.getElementById("dt-sn")||{}).value||"";
   t.yachtName = (document.getElementById("dt-yn")||{}).value||"";
   t.sailKm = +(document.getElementById("dt-sk")||{}).value||0;
+  t.segelKm = t.sailKm;   // GPS-Wert hat in der Punkteberechnung Vorrang -> Korrektur sonst wirkungslos
   t.sailSm = +(document.getElementById("dt-ss")||{}).value||0;
   t.motorKm = +(document.getElementById("dt-mk")||{}).value||0;
   t.motorSm = +(document.getElementById("dt-ms")||{}).value||0;
@@ -14506,6 +14522,7 @@ SCKR.fahrtenbuch.saveDetail = async function() {
   if(stt) t.startTime = new Date(t.date+"T"+stt+":00").toISOString();
   if(ett) t.endTime = new Date(t.date+"T"+ett+":00").toISOString();
   t.lastEdited = new Date().toISOString();
+  delete t._unsaved;
   await SCKR.fahrtenbuch.saveTrip(t);
   SCKR.core.ui.closeSheet();
   SCKR.core.ui.toast("GESPEICHERT - "+Math.round(SCKR.fahrtenbuch.points.trip(t))+" PKT");
@@ -15399,6 +15416,7 @@ SCKR.fahrtenbuch.openNewTrip = function() {
   var t = SCKR.fahrtenbuch.newTrip();
   var b = SCKR.fahrtenbuch.getActiveBoat();
   if(b) { t.boatId=b.id; t.boatClass=b.boatClass||""; t.sailNumber=b.sailNumber||""; t.yachtName=b.name||""; }
+  t._unsaved = true;   // wird erst beim Speichern ein echter Eintrag
   SCKR.fahrtenbuch.state.trips.unshift(t);
   SCKR.fahrtenbuch.openDetail(t.id);
 };
@@ -15971,7 +15989,7 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     };
     var numCell = function(ref,v) { return '<c r="'+ref+'"><v>'+v+'</v></c>'; };
     var serial = function(d) { return Math.floor((new Date(d)-new Date(Date.UTC(1899,11,30)))/86400000); };
-    var timeFrac = function(d) { var t=new Date(d); return (t.getUTCHours()*3600+t.getUTCMinutes()*60+t.getUTCSeconds())/86400; };
+    var timeFrac = function(d) { var t=new Date(d); return (t.getHours()*3600+t.getMinutes()*60+t.getSeconds())/86400; };   // Ortszeit (vorher UTC: 10:00 -> 08:00)
     var inject = function(xml,ref,cell) {
       var re = new RegExp('<c r="'+ref+'"[^/]*?(?:/>|>[\\s\\S]*?</c>)');
       if(re.test(xml)) return xml.replace(re,cell);
