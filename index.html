@@ -12383,6 +12383,7 @@ SCKR.fahrtenbuch.state = {
   currentPos: null,
   currentWeather: null,
   seasonYear: 0,
+  seasonClose: {},
   filterYear: "all",
   filterMonth: "all",
   selectedBoatId: null
@@ -12441,6 +12442,101 @@ SCKR.fahrtenbuch.points = {
 
 SCKR.fahrtenbuch.seasonRange = function(y) { return {start:new Date(Date.UTC(y-1,10,1)), end:new Date(Date.UTC(y,9,31,23,59,59))}; };
 SCKR.fahrtenbuch.seasonFor = function(d) { var m=new Date(d).getUTCMonth(), y=new Date(d).getUTCFullYear(); return m>=10?y+1:y; };
+
+/* ── SAISON-ZUORDNUNG inkl. "Bordbuch abgegeben" ─────────────
+   Standard: Saison = Kalenderjahr des Fahrtdatums.
+   Nach "Bordbuch abgegeben" (seasonClose[Jahr].day) zählen Fahrten mit Datum
+   NACH dem Abgabetag zur Folgesaison. Pro Fahrt kann das im Editor
+   überschrieben werden (t.seasonYear), aber nur innerhalb Jahr/Jahr+1. */
+SCKR.fahrtenbuch.tripSeason = function(t) {
+  if(!t || !t.date) return null;
+  var d = String(t.date).slice(0,10), y = d.slice(0,4);
+  if(!/^\d{4}$/.test(y)) return null;
+  var c = (SCKR.fahrtenbuch.state.seasonClose || {})[y];
+  if(!c || !c.day) return y;
+  var next = String(+y + 1);
+  if(t.seasonYear === y || t.seasonYear === next) return t.seasonYear;
+  return d > c.day ? next : y;
+};
+SCKR.fahrtenbuch.currentSeason = function() {
+  var y = String(new Date().getFullYear());
+  return (SCKR.fahrtenbuch.state.seasonClose || {})[y] ? String(+y + 1) : y;
+};
+SCKR.fahrtenbuch._localDay = function(dt) {
+  dt = dt || new Date();
+  return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
+};
+
+SCKR.fahrtenbuch.openSeasonClose = function() {
+  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
+  var today = SCKR.fahrtenbuch._localDay();
+  var html = '<div class="sheet-hd"><h3>Bordbuch '+y+' abgegeben</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
+    + '<div style="padding:14px;font-size:14px;color:var(--off);line-height:1.6">'
+    + 'Alle Fahrten <strong>nach</strong> dem Abgabetag z\u00E4hlen ab dann f\u00FCr die <strong>Saison '+next+'</strong> \u2013 Punkte, Rang, Abzeichen und Excel-Export.'
+    + '<div class="fld" style="margin-top:14px"><label class="lbl">Bordbuch abgegeben am</label>'
+    + '<input class="inp" id="sc-day" type="date" value="'+today+'" min="'+y+'-01-01" max="'+today+'"></div>'
+    + '<div style="font-size:12px;color:var(--mut);margin-top:6px">Die Saison '+y+' wird dabei gespeichert. Du kannst das jederzeit r\u00FCckg\u00E4ngig machen.</div>'
+    + '</div><div style="display:flex;flex-direction:column;gap:8px;padding:0 14px 20px">'
+    + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.confirmSeasonClose()">ABGABE SPEICHERN</button>'
+    + '<button type="button" class="btn btn-ghost" onclick="SCKR.core.ui.closeSheet()">ABBRECHEN</button></div>';
+  SCKR.core.ui.openSheet(html);
+};
+SCKR.fahrtenbuch.confirmSeasonClose = async function() {
+  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
+  var day = (document.getElementById("sc-day")||{}).value || SCKR.fahrtenbuch._localDay();
+  if(day.slice(0,4) !== y) { SCKR.core.ui.toast("DATUM MUSS IN "+y+" LIEGEN"); return; }
+  var sc = Object.assign({}, st.seasonClose || {});
+  sc[y] = {day: day, at: new Date().toISOString()};
+  try { await SCKR.core.storage.set("seasonClose", sc); }
+  catch(e) { SCKR.core.ui.toast("SPEICHERN FEHLGESCHLAGEN"); return; }
+  st.seasonClose = sc;
+  try { var e = await SCKR.fahrtenbuch._archiveSeason(y); e.source = "abgabe";
+        st._seasonArchive[y] = e; await SCKR.core.storage.set("seasonArchive", st._seasonArchive); } catch(e2){}
+  try { await SCKR.core.storage.set("seasonState", {trackedYear: next}); } catch(e3){}
+  if(st.filterYear === y) st.filterYear = "all";
+  SCKR.core.ui.closeSheet();
+  SCKR.core.ui.toast("NEUE FAHRTEN Z\u00C4HLEN F\u00DCR "+next);
+  SCKR.fahrtenbuch._rerenderSeasonViews();
+};
+SCKR.fahrtenbuch.undoSeasonClose = async function(y) {
+  var st = SCKR.fahrtenbuch.state;
+  if(!y || !(st.seasonClose||{})[y]) return;
+  if(!confirm("Abgabe f\u00FCr "+y+" zur\u00FCcknehmen? Fahrten nach dem Abgabetag z\u00E4hlen dann wieder f\u00FCr "+y+".")) return;
+  var sc = Object.assign({}, st.seasonClose); delete sc[y];
+  try { await SCKR.core.storage.set("seasonClose", sc); } catch(e) { SCKR.core.ui.toast("SPEICHERN FEHLGESCHLAGEN"); return; }
+  st.seasonClose = sc;
+  var arch = st._seasonArchive || {};
+  if(arch[y] && arch[y].source === "abgabe") { delete arch[y]; try { await SCKR.core.storage.set("seasonArchive", arch); } catch(e){} }
+  try { await SCKR.core.storage.set("seasonState", {trackedYear: y}); } catch(e){}
+  SCKR.core.ui.toast("ABGABE "+y+" ZUR\u00DCCKGENOMMEN");
+  SCKR.fahrtenbuch._rerenderSeasonViews();
+};
+// Saison-Auswahl im Fahrt-Editor: nur sichtbar, wenn für das Jahr des Datums ein Bordbuch abgegeben wurde
+SCKR.fahrtenbuch._renderSeasonSelect = function(t) {
+  var y = t && t.date ? String(t.date).slice(0,4) : null;
+  if(!y || !(SCKR.fahrtenbuch.state.seasonClose||{})[y]) return '';
+  var cur = SCKR.fahrtenbuch.tripSeason(t), next = String(+y + 1);
+  return '<div class="fld"><label class="lbl">Z\u00E4hlt f\u00FCr Saison</label><select class="inp" id="dt-season" data-y="'+y+'">'
+    + '<option value="'+y+'"'+(cur===y?' selected':'')+'>'+y+' (Bordbuch abgegeben)</option>'
+    + '<option value="'+next+'"'+(cur===next?' selected':'')+'>'+next+'</option></select></div>';
+};
+
+SCKR.fahrtenbuch._rerenderSeasonViews = function() {
+  try { SCKR.fahrtenbuch.render.trips(); } catch(e){}
+  try { SCKR.fahrtenbuch.render.stats(); } catch(e){}
+};
+SCKR.fahrtenbuch._renderSeasonCloseBox = function() {
+  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
+  var c = (st.seasonClose||{})[y];
+  var box = 'margin:0 0 14px;padding:12px 14px;border:1px solid var(--bdr2);border-radius:var(--r);background:var(--bg2);font-size:13px;color:var(--off);line-height:1.5';
+  if(c) {
+    var dd = c.day.split("-").reverse().join(".");
+    return '<div style="'+box+'">\uD83D\uDCD8 <strong>Bordbuch '+y+' abgegeben</strong> am '+dd+'.<br>Neue Fahrten z\u00E4hlen f\u00FCr die <strong>Saison '+next+'</strong>.'
+      + ' <button type="button" onclick="SCKR.fahrtenbuch.undoSeasonClose(\''+y+'\')" style="background:none;border:none;color:var(--acc);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">R\u00FCckg\u00E4ngig</button></div>';
+  }
+  return '<div style="'+box+';display:flex;align-items:center;gap:10px"><div style="flex:1">\uD83D\uDCD8 Bordbuch '+y+' schon abgegeben? Dann z\u00E4hlen neue Fahrten f\u00FCr '+next+'.</div>'
+    + '<button type="button" class="btn btn-ghost" style="padding:8px 10px;font-size:12px;white-space:nowrap" onclick="SCKR.fahrtenbuch.openSeasonClose()">ABGEGEBEN</button></div>';
+};
 
 SCKR.fahrtenbuch.newTrip = function(p) {
   var base = {
@@ -13960,11 +14056,11 @@ SCKR.fahrtenbuch.render.trips = function() {
   var st = SCKR.fahrtenbuch.state;
   var esc = SCKR.core.fmt.esc;
   var trips = st.trips.filter(function(t) {
-    if(st.filterYear && st.filterYear !== "all" && (!t.date || t.date.slice(0,4) !== st.filterYear)) return false;
+    if(st.filterYear && st.filterYear !== "all" && SCKR.fahrtenbuch.tripSeason(t) !== st.filterYear) return false;
     return true;
   });
   var years = [];
-  st.trips.forEach(function(t) { var y=t.date?t.date.slice(0,4):null; if(y && years.indexOf(y)===-1) years.push(y); });
+  st.trips.forEach(function(t) { var y=SCKR.fahrtenbuch.tripSeason(t); if(y && years.indexOf(y)===-1) years.push(y); });
   years.sort().reverse();
 
   var html = '<div class="shead"><div><div class="lxs">'+trips.length+' Eintraege</div><h2>Fahrten</h2></div>'
@@ -13988,7 +14084,9 @@ SCKR.fahrtenbuch.render.trips = function() {
       var mergeFlag = t._mergeFlag ? '<span style="font-family:var(--fd);font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(230,126,34,.2);color:var(--orange);margin-left:6px">'+t._mergeFlag.toUpperCase()+'</span>' : "";
       html += '<button type="button" class="trip-card" onclick="SCKR.fahrtenbuch.openDetail(this.dataset.tid)" data-tid="'+t.id+'">'
         + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
-        + '<div style="font-family:var(--fd);font-size:17px;font-weight:800;color:var(--wh)">'+esc(t.date||"")+mergeFlag+'</div>'
+        + '<div style="font-family:var(--fd);font-size:17px;font-weight:800;color:var(--wh)">'+esc(t.date||"")+mergeFlag
+        + ((t.date && SCKR.fahrtenbuch.tripSeason(t) !== String(t.date).slice(0,4)) ? '<span style="font-family:var(--fd);font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(52,152,219,.18);color:var(--text);margin-left:6px">SAISON '+SCKR.fahrtenbuch.tripSeason(t)+'</span>' : '')
+        + '</div>'
         + '<div style="font-family:var(--fd);font-size:14px;font-weight:800;color:var(--acc);background:rgba(200,16,46,.08);padding:2px 8px;border-radius:4px">'+pts+' Pkt</div></div>'
         + '<div style="font-size:13px;color:var(--off);margin-bottom:6px">'+esc(t.description||t.route||"")+'</div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
@@ -14016,7 +14114,7 @@ SCKR.fahrtenbuch.render.stats = function() {
   var P = SCKR.fahrtenbuch.points;
   var allTrips = st.trips;
   var trips = allTrips.filter(function(t){
-    return !st.filterYear||st.filterYear==="all"||(t.date&&t.date.slice(0,4)===st.filterYear);
+    return !st.filterYear||st.filterYear==="all"||SCKR.fahrtenbuch.tripSeason(t)===st.filterYear;
   });
 
   var totalPts = trips.reduce(function(s,t){return s+Math.round(P.trip(t));},0);
@@ -14028,7 +14126,7 @@ SCKR.fahrtenbuch.render.stats = function() {
 
   var years = [];
   allTrips.forEach(function(t){
-    var y = t.date ? t.date.slice(0,4) : null;
+    var y = SCKR.fahrtenbuch.tripSeason(t);
     if(y && years.indexOf(y)===-1) years.push(y);
   });
   years.sort().reverse();
@@ -14053,6 +14151,7 @@ SCKR.fahrtenbuch.render.stats = function() {
   var html = '<div class="shead"><div><div class="lxs">BSV Fahrtenwettbewerb</div><h2>Saisonpunkte</h2></div></div>';
 
   html += SCKR.fahrtenbuch._renderGoalsWidget();
+  html += SCKR.fahrtenbuch._renderSeasonCloseBox();
 
   // ── Jahres-Filter ────────────────────────────────────────
   if(years.length > 0) {
@@ -14293,6 +14392,12 @@ SCKR.fahrtenbuch.saveDetail = async function() {
   if(!t) return;
   var w = SCKR.fahrtenbuch.weather.readFromFields();
   t.date = (document.getElementById("dt-date")||{}).value||t.date;
+  var _ssel = document.getElementById("dt-season");
+  if(_ssel && _ssel.dataset.y === String(t.date).slice(0,4)) {
+    // nur speichern, wenn vom Automatik-Wert abweichend gewählt
+    var _auto = (function(){ var c=(SCKR.fahrtenbuch.state.seasonClose||{})[_ssel.dataset.y]; return (c && String(t.date).slice(0,10) > c.day) ? String(+_ssel.dataset.y+1) : _ssel.dataset.y; })();
+    if(_ssel.value === _auto) delete t.seasonYear; else t.seasonYear = _ssel.value;
+  } else if(t.seasonYear && String(t.date).slice(0,4) !== String(t.seasonYear) && String(+String(t.date).slice(0,4)+1) !== String(t.seasonYear)) { delete t.seasonYear; }
   t.description = (document.getElementById("dt-desc")||{}).value||"";
   t.category = (document.getElementById("dt-cat")||{}).value||t.category;
   t.boatId = (document.getElementById("dt-boat")||{}).value || t.boatId || "";
@@ -14419,7 +14524,7 @@ SCKR.fahrtenbuch._badgeAgg = function(trips) {
   var a = {totalSm:0,count:trips.length,maxSm:0,bridges:0,locks:0,points:0,maxKn:0,
            nightCount:0,strongCount:0,stormCount:0,endurCount:0,endur12Count:0,earlyCount:0,allroundCount:0,regattaCount:0,
            monthsCount:0,calMonthsCount:0,yearsCount:0,maxSeasonCount:0,maxSeasonRegatta:0,regattaStrongCount:0};
-  var months={}, years={}, calMonths={}, regattaYears={};
+  var months={}, years={}, calYears={}, calMonths={}, regattaYears={};
   trips.forEach(function(t){
     var segKm=(t.segelKm||t.sailKm||0), motKm=(t.motorKm||0), tot=segKm+motKm, sm=tot/1.852;
     a.totalSm+=sm; if(sm>a.maxSm)a.maxSm=sm;
@@ -14428,18 +14533,18 @@ SCKR.fahrtenbuch._badgeAgg = function(trips) {
     if(t.maxSpeed){ var kn=t.maxSpeed*1.94384; if(kn>a.maxKn)a.maxKn=kn; }
     if(segKm>0&&motKm>0) a.allroundCount++;
     var _wf=(parseInt(t.windForce,10)||0); if(_wf>=5) a.strongCount++; if(_wf>=7) a.stormCount++;
-    if(t.hasRegattaFn){ a.regattaCount++; if(_wf>=5) a.regattaStrongCount++; if(t.date) regattaYears[String(t.date).slice(0,4)]=(regattaYears[String(t.date).slice(0,4)]||0)+1; }
+    if(t.hasRegattaFn){ a.regattaCount++; if(_wf>=5) a.regattaStrongCount++; if(t.date){ var _rs=SCKR.fahrtenbuch.tripSeason(t); regattaYears[_rs]=(regattaYears[_rs]||0)+1; } }
     if(t.startTime){ var sh=new Date(t.startTime).getHours(); if(sh<6) a.earlyCount++;
       if(sh>=21||sh<5) a.nightCount++; }
     if(t.startTime&&t.endTime){ var ms=new Date(t.endTime)-new Date(t.startTime);
       if(ms>6*3600000) a.endurCount++;
       if(ms>12*3600000) a.endur12Count++;
       var eh=new Date(t.endTime).getHours(); if((eh>=21||eh<5)&&a.nightCount===0) a.nightCount++; }
-    if(t.date){ months[t.date.slice(0,7)]=true; calMonths[t.date.slice(5,7)]=true; years[t.date.slice(0,4)]=(years[t.date.slice(0,4)]||0)+1; }
+    if(t.date){ months[t.date.slice(0,7)]=true; calMonths[t.date.slice(5,7)]=true; var _ys=SCKR.fahrtenbuch.tripSeason(t); years[_ys]=(years[_ys]||0)+1; calYears[t.date.slice(0,4)]=true; }
   });
   a.monthsCount=Object.keys(months).length;
   a.calMonthsCount=Object.keys(calMonths).length;
-  a.yearsCount=Object.keys(years).length;
+  a.yearsCount=Object.keys(calYears).length;  // "in 5 verschiedenen Jahren" = Kalenderjahre
   Object.keys(years).forEach(function(y){ if(years[y]>a.maxSeasonCount)a.maxSeasonCount=years[y]; });
   Object.keys(regattaYears).forEach(function(y){ if(regattaYears[y]>a.maxSeasonRegatta)a.maxSeasonRegatta=regattaYears[y]; });
   return a;
@@ -14541,7 +14646,9 @@ SCKR.fahrtenbuch._checkSeasonRollover = async function() {
   if(!ss || !ss.trackedYear) { try { await SCKR.core.storage.set("seasonState", {trackedYear:curYear}); } catch(e){} return; }
   if(String(ss.trackedYear) >= curYear) return;
   var oldYear = String(ss.trackedYear);
-  var oldTrips = SCKR.fahrtenbuch.state.trips.filter(function(t){ return t.date && String(t.date).slice(0,4)===oldYear; });
+  // Saison wurde per "Bordbuch abgegeben" schon gespeichert -> keine Rückfrage
+  if((SCKR.fahrtenbuch.state.seasonClose||{})[oldYear]) { try { await SCKR.core.storage.set("seasonState", {trackedYear:curYear}); } catch(e){} return; }
+  var oldTrips = SCKR.fahrtenbuch.state.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===oldYear; });
   if(oldTrips.length === 0) { try { await SCKR.core.storage.set("seasonState", {trackedYear:curYear}); } catch(e){} return; }
   var r = SCKR.fahrtenbuch.computeRank(null, oldYear);
   SCKR.fahrtenbuch.state._rolloverYear = oldYear;
@@ -14594,8 +14701,8 @@ SCKR.fahrtenbuch._showSeasonArchive = function() {
 
 SCKR.fahrtenbuch.computeRank = function(trips, year) {
   var all = trips || SCKR.fahrtenbuch.state.trips;
-  var y = year || String(new Date().getFullYear());
-  var seasonTrips = all.filter(function(t){ return t.date && String(t.date).slice(0,4)===y; });
+  var y = year || SCKR.fahrtenbuch.currentSeason();
+  var seasonTrips = all.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===y; });
   var a = SCKR.fahrtenbuch._badgeAgg(seasonTrips);
   var sm = a.totalSm, R = SCKR.fahrtenbuch.RANKS, cur = R[0], next = null;
   for(var i=0;i<R.length;i++){ if(sm >= R[i].sm){ cur = R[i]; next = R[i+1]||null; } }
@@ -14735,7 +14842,7 @@ SCKR.fahrtenbuch._socialStats = function(t) {
 /* ════════════ SAISON-KARTE ════════════ */
 SCKR.fahrtenbuch.seasonCard = function(year) {
   var st = SCKR.fahrtenbuch.state;
-  year = year || ((st.filterYear && st.filterYear!=="all") ? st.filterYear : String(new Date().getFullYear()));
+  year = year || ((st.filterYear && st.filterYear!=="all") ? st.filterYear : SCKR.fahrtenbuch.currentSeason());
   SCKR.fahrtenbuch._cardTripId = null;
   SCKR.core.ui.toast("SAISON-KARTE WIRD ERSTELLT\u2026");
   SCKR.fahrtenbuch._renderSeasonCard(year).then(function(cv){
@@ -14755,7 +14862,7 @@ SCKR.fahrtenbuch.seasonCard = function(year) {
 SCKR.fahrtenbuch._renderSeasonCard = function(year) {
   return new Promise(function(resolve){
     var st=SCKR.fahrtenbuch.state;
-    var trips=st.trips.filter(function(t){return t.date && t.date.slice(0,4)===String(year);});
+    var trips=st.trips.filter(function(t){return SCKR.fahrtenbuch.tripSeason(t)===String(year);});
     var a=SCKR.fahrtenbuch._badgeAgg(trips);
     var cfg=SCKR.fahrtenbuch._postCfg();
     var W=1080,H=1350, cv=document.createElement("canvas"); cv.width=W; cv.height=H;
@@ -15080,6 +15187,7 @@ SCKR.fahrtenbuch.openDetail = function(tripId) {
   // Basic info
   html += '<div class="pnl"><div class="phd"><span class="phd-t">Grunddaten</span></div>'
     + '<div class="fld"><label class="lbl">Datum</label><input class="inp" id="dt-date" type="date" value="'+esc(t.date||"")+'"></div>'
+    + SCKR.fahrtenbuch._renderSeasonSelect(t)
     + '<div class="fld"><label class="lbl">Beschreibung / Route</label><input class="inp" id="dt-desc" value="'+esc(t.description||t.route||"")+'" placeholder="z.B. Kruepelsee - Wolzig"></div>'
     + '<div class="fld"><label class="lbl">Kategorie</label><select class="inp" id="dt-cat"><option value="Binnen"'+(t.category==="Binnen"?" selected":"")+'>Binnen</option><option value="Kueste"'+(t.category==="Kueste"?" selected":"")+'>Kueste</option><option value="Hochsee"'+(t.category==="Hochsee"?" selected":"")+'>Hochsee</option></select></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0"><div class="fld"><label class="lbl">Start</label><input class="inp" id="dt-st" type="time" value="'+startT+'"></div>'
@@ -15453,7 +15561,7 @@ SCKR.fahrtenbuch._maybeShowBackupNudge = function() {
 
 SCKR.fahrtenbuch.exportJSON = function() {
   var st = SCKR.fahrtenbuch.state;
-  var data = {version:2, exported:new Date().toISOString(), profile:st.profile, trips:st.trips, boats:st.boats, branding:SCKR.admin.state.branding, sponsors:SCKR.admin.state.sponsors};
+  var data = {version:2, exported:new Date().toISOString(), profile:st.profile, trips:st.trips, boats:st.boats, branding:SCKR.admin.state.branding, sponsors:SCKR.admin.state.sponsors, seasonClose:st.seasonClose||{}};
   var filename = "SCKR_Fahrtenbuch_"+new Date().toISOString().slice(0,10)+".json";
   var json = JSON.stringify(data, null, 2);
 
@@ -15532,6 +15640,19 @@ SCKR.fahrtenbuch.saveToFiles = function() {
   SCKR.core.ui.toast("TEILEN OEFFNEN UM IN ICLOUD ZU SPEICHERN");
 };
 
+// Abgabe-Daten aus Backup übernehmen: nur Jahre, die lokal noch nicht gesetzt sind
+SCKR.fahrtenbuch._importSeasonClose = function(inc) {
+  if(!inc || typeof inc !== "object") return;
+  var st = SCKR.fahrtenbuch.state, sc = Object.assign({}, st.seasonClose||{}), added = 0;
+  Object.keys(inc).forEach(function(y){
+    var c = inc[y];
+    if(/^\d{4}$/.test(y) && !sc[y] && c && typeof c.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(c.day) && c.day.slice(0,4)===y) { sc[y] = {day:c.day, at:String(c.at||"")}; added++; }
+  });
+  if(!added) return;
+  st.seasonClose = sc;
+  SCKR.core.storage.set("seasonClose", sc).catch(function(){});
+};
+
 SCKR.fahrtenbuch.importJSON = function(input) {
   var file = input.files[0]; if(!file) return;
   file.text().then(function(text) {
@@ -15539,6 +15660,7 @@ SCKR.fahrtenbuch.importJSON = function(input) {
     try { data = JSON.parse(text); } catch(e) { SCKR.core.ui.toast("UNGUELTIGE JSON-DATEI"); return; }
     var incoming = data.trips || [];
     SCKR.fahrtenbuch._importMeta = {boats:data.boats, profile:data.profile, branding:data.branding, sponsors:data.sponsors};
+    SCKR.fahrtenbuch._importSeasonClose(data.seasonClose);
     if(incoming.length === 0) { SCKR.core.ui.toast("KEINE FAHRTEN IN DATEI"); return; }
     SCKR.fahrtenbuch.showMergePreview(incoming);
   }).catch(function(e){ SCKR.core.ui.toast("IMPORT-FEHLER: "+e.message); });
@@ -15766,7 +15888,16 @@ SCKR.fahrtenbuch.exportExcel = async function() {
       return dt.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"});
     };
 
-    var sorted = st.trips.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);}).slice(0,50);
+    // Nur eine Saison exportieren (gewählter Filter, sonst aktuelle Saison) – BSV-Formular = eine Saison
+    var exSeason = (st.filterYear && st.filterYear!=="all") ? st.filterYear : SCKR.fahrtenbuch.currentSeason();
+    var seasonTrips = st.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===exSeason; });
+    if(seasonTrips.length === 0) {
+      var _lastClosed = String(+exSeason - 1);
+      if((st.seasonClose||{})[_lastClosed]) { exSeason = _lastClosed; seasonTrips = st.trips.filter(function(t){ return SCKR.fahrtenbuch.tripSeason(t)===exSeason; }); }
+    }
+    var sorted = seasonTrips.slice().sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+    if(sorted.length > 50) SCKR.core.ui.toast("HINWEIS: NUR DIE ERSTEN 50 VON "+sorted.length+" FAHRTEN PASSEN INS FORMULAR");
+    sorted = sorted.slice(0,50);
     for(var j=0;j<sorted.length;j++) {
       var t = sorted[j], r = 6+j;
       sheet = inject(sheet,"B"+r,inlCell("B"+r,fmtDate(t.date)));
@@ -15811,10 +15942,10 @@ SCKR.fahrtenbuch.exportExcel = async function() {
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = "Fahrtenbuch_SCKR_"+new Date().toISOString().slice(0,10)+".xlsx";
+    a.download = "Fahrtenbuch_SCKR_Saison_"+exSeason+"_"+new Date().toISOString().slice(0,10)+".xlsx";
     a.click();
     URL.revokeObjectURL(url);
-    SCKR.core.ui.toast("EXCEL HERUNTERGELADEN");
+    SCKR.core.ui.toast("EXCEL SAISON "+exSeason+" HERUNTERGELADEN");
   } catch(e) { SCKR.core.ui.toast("EXCEL-FEHLER: "+e.message); }
 };
 
@@ -15842,6 +15973,7 @@ SCKR.fahrtenbuch.exportExcel = async function() {
 
   // Saison-Archiv laden (für Rang-Banner-Link)
   try { st._seasonArchive = (await SCKR.core.storage.get("seasonArchive")) || {}; } catch(e){}
+  try { st.seasonClose = (await SCKR.core.storage.get("seasonClose")) || {}; } catch(e){ st.seasonClose = {}; }
   try { await SCKR.fahrtenbuch._initMilestones(); } catch(e){}
   try {
     if(navigator.storage && navigator.storage.persist) {
