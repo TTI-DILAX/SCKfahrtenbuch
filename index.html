@@ -11345,7 +11345,7 @@ window.SCKR_GPS = (function() {
     var id = null, failed = false;
     try {
       id = await Promise.resolve(p.addWatcher({
-        backgroundMessage: appTitle() + ' zeichnet deine Fahrt auf.',
+        backgroundMessage: ((window.SCKR && SCKR.core && SCKR.core.displayTitle) ? SCKR.core.displayTitle(appTitle()) : appTitle()) + ' zeichnet deine Fahrt auf.',
         backgroundTitle: 'GPS aktiv',
         requestPermissions: true,
         stale: false,
@@ -12397,13 +12397,19 @@ SCKR.admin._finishSetup = function() {
 };
 SCKR.admin._skipSetup = function(){ try{ SCKR.core.storage.set("wl_setup_done","1"); }catch(e){} SCKR.core.ui.closeSheet(); };
 
+// Jahreszahl im App-Titel ("Fahrtenbuch 2026") automatisch auf die aktuelle Saison setzen
+SCKR.core.displayTitle = function(title) {
+  var y; try { y = SCKR.fahrtenbuch.currentSeason(); } catch(e) { y = String(new Date().getFullYear()); }
+  return String(title||"").replace(/\b20\d{2}\b/, y);
+};
 SCKR.admin.applyBranding = function() {
   var b = SCKR.admin.state.branding;
   SCKR.admin.applyColorsByTheme();
   var c = document.getElementById("club-name");
   var t = document.getElementById("app-title");
   if(c) c.textContent = b.clubName;
-  if(t) t.textContent = b.appTitle;
+  if(t) t.textContent = SCKR.core.displayTitle(b.appTitle);
+  try { document.title = SCKR.core.displayTitle(document.title); } catch(e) {}
   if(b.logoB64) SCKR.core.ui.applyLogo(b.logoB64);
 };
 
@@ -12671,6 +12677,7 @@ SCKR.fahrtenbuch._renderSeasonSelect = function(t) {
 };
 
 SCKR.fahrtenbuch._rerenderSeasonViews = function() {
+  try { SCKR.admin.applyBranding(); } catch(e){}
   try { SCKR.fahrtenbuch.render.trips(); } catch(e){}
   try { SCKR.fahrtenbuch.render.stats(); } catch(e){}
 };
@@ -15709,6 +15716,8 @@ SCKR.fahrtenbuch._backupStaleDays = function() {
   return last ? Math.floor((Date.now()-last.getTime())/86400000) : 999;
 };
 SCKR.fahrtenbuch._maybeShowBackupNudge = function() {
+  // Nicht über einen anderen offenen Dialog legen (z. B. Jahreswechsel-Frage)
+  try { if (document.getElementById("sheet-bg").classList.contains("open")) return; } catch(e) {}
   if(SCKR.fahrtenbuch._backupNudgeShownThisSession) return;
   var days = SCKR.fahrtenbuch._backupStaleDays();
   if(days < 7) return;
@@ -16175,6 +16184,7 @@ SCKR.fahrtenbuch.exportExcel = async function() {
   // Saison-Archiv laden (für Rang-Banner-Link)
   try { st._seasonArchive = (await SCKR.core.storage.get("seasonArchive")) || {}; } catch(e){}
   try { st.seasonClose = (await SCKR.core.storage.get("seasonClose")) || {}; } catch(e){ st.seasonClose = {}; }
+  try { SCKR.admin.applyBranding(); } catch(e){}   // Titel-Jahreszahl hängt von der Abgabe ab
   try { await SCKR.fahrtenbuch._initMilestones(); } catch(e){}
   try {
     if(navigator.storage && navigator.storage.persist) {
