@@ -45,8 +45,10 @@ self.addEventListener('fetch', function(e) {
         if (res && res.ok) {
           var copy = res.clone();
           caches.open(APP).then(function(c) { c.put('./index.html', copy); });
+          return res;
         }
-        return res;
+        // z. B. 404 während eines Umzugs: lieber die zwischengespeicherte App zeigen
+        return caches.open(APP).then(function(c) { return c.match('./index.html'); }).then(function(hit) { return hit || res; });
       }).catch(function() {
         return caches.open(APP).then(function(c) {
           return c.match('./index.html')

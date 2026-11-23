@@ -12618,14 +12618,17 @@ SCKR.fahrtenbuch._localDay = function(dt) {
   return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
 };
 
-SCKR.fahrtenbuch.openSeasonClose = function() {
-  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
+SCKR.fahrtenbuch.openSeasonClose = function(year) {
+  var st = SCKR.fahrtenbuch.state, cy = String(new Date().getFullYear());
+  var y = (year && /^\d{4}$/.test(String(year))) ? String(year) : cy, next = String(+y + 1);
   var today = SCKR.fahrtenbuch._localDay();
+  var maxDay = (y === cy) ? today : y + "-12-31";
+  var defDay = (y === cy) ? today : y + "-11-01";
   var html = '<div class="sheet-hd"><h3>Bordbuch '+y+' abgegeben</h3><button class="sheet-close" type="button" onclick="SCKR.core.ui.closeSheet()">SCHLIESSEN</button></div>'
     + '<div style="padding:14px;font-size:14px;color:var(--off);line-height:1.6">'
     + 'Alle Fahrten <strong>nach</strong> dem Abgabetag z\u00E4hlen ab dann f\u00FCr die <strong>Saison '+next+'</strong> \u2013 Punkte, Rang, Abzeichen und Excel-Export.'
     + '<div class="fld" style="margin-top:14px"><label class="lbl">Bordbuch abgegeben am</label>'
-    + '<input class="inp" id="sc-day" type="date" value="'+today+'" min="'+y+'-01-01" max="'+today+'"></div>'
+    + '<input class="inp" id="sc-day" type="date" data-year="'+y+'" value="'+defDay+'" min="'+y+'-01-01" max="'+maxDay+'"></div>'
     + '<div style="font-size:12px;color:var(--mut);margin-top:6px">Die Saison '+y+' wird dabei gespeichert. Du kannst das jederzeit r\u00FCckg\u00E4ngig machen.</div>'
     + '</div><div style="display:flex;flex-direction:column;gap:8px;padding:0 14px 20px">'
     + '<button type="button" class="btn btn-red" onclick="SCKR.fahrtenbuch.confirmSeasonClose()">ABGABE SPEICHERN</button>'
@@ -12633,8 +12636,9 @@ SCKR.fahrtenbuch.openSeasonClose = function() {
   SCKR.core.ui.openSheet(html);
 };
 SCKR.fahrtenbuch.confirmSeasonClose = async function() {
-  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
-  var day = (document.getElementById("sc-day")||{}).value || SCKR.fahrtenbuch._localDay();
+  var st = SCKR.fahrtenbuch.state, _inp = document.getElementById("sc-day") || {};
+  var y = (_inp.dataset && _inp.dataset.year) || String(new Date().getFullYear()), next = String(+y + 1);
+  var day = _inp.value || SCKR.fahrtenbuch._localDay();
   if(day.slice(0,4) !== y) { SCKR.core.ui.toast("DATUM MUSS IN "+y+" LIEGEN"); return; }
   var sc = Object.assign({}, st.seasonClose || {});
   sc[y] = {day: day, at: new Date().toISOString()};
@@ -12643,7 +12647,8 @@ SCKR.fahrtenbuch.confirmSeasonClose = async function() {
   st.seasonClose = sc;
   try { var e = await SCKR.fahrtenbuch._archiveSeason(y); e.source = "abgabe";
         st._seasonArchive[y] = e; await SCKR.core.storage.set("seasonArchive", st._seasonArchive); } catch(e2){}
-  try { await SCKR.core.storage.set("seasonState", {trackedYear: next}); } catch(e3){}
+  var _cy = String(new Date().getFullYear());
+  try { await SCKR.core.storage.set("seasonState", {trackedYear: (+next > +_cy ? next : _cy)}); } catch(e3){}
   if(st.filterYear === y) st.filterYear = "all";
   SCKR.core.ui.closeSheet();
   SCKR.core.ui.toast("NEUE FAHRTEN Z\u00C4HLEN F\u00DCR "+next);
@@ -12660,7 +12665,8 @@ SCKR.fahrtenbuch.undoSeasonClose = async function(y) {
   if(arch[y] && arch[y].source === "abgabe") { delete arch[y]; try { await SCKR.core.storage.set("seasonArchive", arch); } catch(e){} }
   // manuelle Saison-Zuordnungen dieses Jahres zurücksetzen
   for (var _i = 0; _i < st.trips.length; _i++) { var _t = st.trips[_i]; if (_t.seasonYear && String(_t.date||"").slice(0,4) === y) { delete _t.seasonYear; await SCKR.core.storage.set("trip:"+_t.id, _t); } }
-  try { await SCKR.core.storage.set("seasonState", {trackedYear: y}); } catch(e){}
+  var _cy2 = String(new Date().getFullYear());
+  try { await SCKR.core.storage.set("seasonState", {trackedYear: (+y < +_cy2 ? _cy2 : y)}); } catch(e){}
   SCKR.core.ui.toast("ABGABE "+y+" ZUR\u00DCCKGENOMMEN");
   SCKR.fahrtenbuch._rerenderSeasonViews();
 };
@@ -12688,6 +12694,11 @@ SCKR.fahrtenbuch._renderSeasonCloseBox = function() {
   if(pc && now.getMonth() <= 2) {
     extra = '<div style="margin:0 0 14px;padding:10px 14px;border:1px solid var(--bdr2);border-radius:var(--r);background:var(--bg2);font-size:12px;color:var(--mut)">\uD83D\uDCD8 Bordbuch '+prev+' abgegeben am '+pc.day.split("-").reverse().join(".")+'. '
       + '<button type="button" onclick="SCKR.fahrtenbuch.undoSeasonClose(\''+prev+'\')" style="background:none;border:none;color:var(--acc);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">R\u00FCckg\u00E4ngig</button></div>';
+  }
+  // Bis Ende März: Vorjahr nachträglich als abgegeben markieren (z. B. nach versehentlichem Rückgängig)
+  if(!pc && now.getMonth() <= 2) {
+    extra += '<div style="margin:0 0 14px;font-size:12px;color:var(--mut)">'
+      + '<button type="button" onclick="SCKR.fahrtenbuch.openSeasonClose(\''+prev+'\')" style="background:none;border:none;color:var(--acc);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">Bordbuch '+prev+' nachtr\u00E4glich als abgegeben markieren</button></div>';
   }
   // Frage nach der Abgabe erst ab August (vorher irrelevant), außer sie ist schon erfolgt
   if(!c && now.getMonth() < 7) return extra;
@@ -14314,7 +14325,7 @@ SCKR.fahrtenbuch.render.stats = function() {
   if(_season) {
     var _keys = trips.filter(function(t){return t.date;}).map(function(t){return String(t.date).slice(0,7);}).sort();
     var _start = (_keys.length && _keys[0] < _season+"-01") ? _keys[0] : _season+"-01";
-    var _end = (_keys.length && _keys[_keys.length-1] > _season+"-12") ? _keys[_keys.length-1] : null;
+    var _end = _keys.length ? _keys[_keys.length-1] : null;
     var _y = +_start.slice(0,4), _m = +_start.slice(5,7)-1;
     for(var _i=0; _i<24; _i++) {
       var _k = _y+"-"+String(_m+1).padStart(2,"0");

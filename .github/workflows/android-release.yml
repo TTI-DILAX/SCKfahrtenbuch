@@ -168,17 +168,18 @@ jobs:
 
       - name: An Tester verteilen (Firebase App Distribution)
         if: env.IS_RELEASE == 'true' && env.HAS_KEYSTORE == 'true' && env.HAS_FIREBASE == 'true'
+        continue-on-error: true   # ein Firebase-Problem soll den GitHub-Release nicht verhindern
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           SA="$RUNNER_TEMP/firebase-sa.json"
+          trap 'rm -f "$SA"' EXIT
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$SA"
           export GOOGLE_APPLICATION_CREDENTIALS="$SA"
-          npx -y firebase-tools@latest appdistribution:distribute "$APK_FILE" \
+          npx -y firebase-tools@15.37.0 appdistribution:distribute "$APK_FILE" \
             --app "$FIREBASE_APP_ID" \
             --groups "$FIREBASE_GROUPS" \
             --release-notes "SCKR Fahrtenbuch $VERSION_NAME"
-          rm -f "$SA"
           echo "- 📲 An Firebase-Testergruppe \`$FIREBASE_GROUPS\` verteilt (Einladung per E-Mail)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: GitHub-Release
