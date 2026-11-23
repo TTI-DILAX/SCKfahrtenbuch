@@ -113,13 +113,15 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
+          # Maven Central drosselt geteilte GitHub-Runner gelegentlich (HTTP 429) -> bis zu 3 Versuche
+          gradle_retry() { for i in 1 2 3; do ./gradlew "$@" --no-daemon --stacktrace && return 0; echo "::warning::Gradle-Versuch $i fehlgeschlagen, neuer Versuch in $((i*60)) s"; sleep $((i*60)); done; return 1; }
           if [ "$HAS_KEYSTORE" = "true" ]; then
-            ./gradlew assembleRelease --no-daemon --stacktrace
+            gradle_retry assembleRelease
             SRC=app/build/outputs/apk/release/app-release.apk
             OUT="SCKR-Fahrtenbuch-v${VERSION_NAME}.apk"
           else
             echo "::warning::Keine Keystore-Secrets gesetzt – baue Debug-APK (App-ID ${APP_ID}.debug, nur zum Testen)."
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            gradle_retry assembleDebug
             SRC=app/build/outputs/apk/debug/app-debug.apk
             OUT="SCKR-Fahrtenbuch-v${VERSION_NAME}-DEBUG.apk"
           fi
