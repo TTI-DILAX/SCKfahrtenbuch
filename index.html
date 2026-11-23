@@ -11453,7 +11453,6 @@ window.SCKR = {
       admin:       true,
       sponsors:    true
     },
-    regelwerkURL: "https://berliner-segler-verband.de/images/Allgemein/Fahrtensegeln/2026/2026_Ausschreibung_Binnen_Kueste_Breitensport.pdf"
   },
   core: {},
   fahrtenbuch: {},
@@ -12400,7 +12399,8 @@ SCKR.admin._skipSetup = function(){ try{ SCKR.core.storage.set("wl_setup_done","
 // Jahreszahl im App-Titel ("Fahrtenbuch 2026") automatisch auf die aktuelle Saison setzen
 SCKR.core.displayTitle = function(title) {
   var y; try { y = SCKR.fahrtenbuch.currentSeason(); } catch(e) { y = String(new Date().getFullYear()); }
-  return String(title||"").replace(/\b20\d{2}\b/, y);
+  // nur eine Saison-Jahreszahl am Ende ersetzen (2024 bis heute+1), nicht z. B. "seit 2005"
+  return String(title||"").replace(/(^|\s)(20\d{2})(?=\s*$)/, function(m, sp, yr) { return (+yr >= 2024 && +yr <= +y + 1) ? sp + y : m; });
 };
 SCKR.admin.applyBranding = function() {
   var b = SCKR.admin.state.branding;
@@ -12533,7 +12533,7 @@ SCKR.fahrtenbuch.state = {
   gpsGranted: false,
   currentPos: null,
   currentWeather: null,
-  seasonYear: 0,
+
   seasonClose: {},
   filterYear: "all",
   filterMonth: "all",
@@ -12593,8 +12593,6 @@ SCKR.fahrtenbuch.points = {
   }
 };
 
-SCKR.fahrtenbuch.seasonRange = function(y) { return {start:new Date(Date.UTC(y-1,10,1)), end:new Date(Date.UTC(y,9,31,23,59,59))}; };
-SCKR.fahrtenbuch.seasonFor = function(d) { var m=new Date(d).getUTCMonth(), y=new Date(d).getUTCFullYear(); return m>=10?y+1:y; };
 
 /* ── SAISON-ZUORDNUNG inkl. "Bordbuch abgegeben" ─────────────
    Standard: Saison = Kalenderjahr des Fahrtdatums.
@@ -12682,15 +12680,24 @@ SCKR.fahrtenbuch._rerenderSeasonViews = function() {
   try { SCKR.fahrtenbuch.render.stats(); } catch(e){}
 };
 SCKR.fahrtenbuch._renderSeasonCloseBox = function() {
-  var st = SCKR.fahrtenbuch.state, y = String(new Date().getFullYear()), next = String(+y + 1);
+  var st = SCKR.fahrtenbuch.state, now = new Date(), y = String(now.getFullYear()), next = String(+y + 1);
   var c = (st.seasonClose||{})[y];
+  var prev = String(+y - 1), pc = (st.seasonClose||{})[prev];
+  var extra = '';
+  // Bis Ende März: Abgabe des Vorjahres weiter anzeigen und zurücknehmbar lassen
+  if(pc && now.getMonth() <= 2) {
+    extra = '<div style="margin:0 0 14px;padding:10px 14px;border:1px solid var(--bdr2);border-radius:var(--r);background:var(--bg2);font-size:12px;color:var(--mut)">\uD83D\uDCD8 Bordbuch '+prev+' abgegeben am '+pc.day.split("-").reverse().join(".")+'. '
+      + '<button type="button" onclick="SCKR.fahrtenbuch.undoSeasonClose(\''+prev+'\')" style="background:none;border:none;color:var(--acc);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">R\u00FCckg\u00E4ngig</button></div>';
+  }
+  // Frage nach der Abgabe erst ab August (vorher irrelevant), außer sie ist schon erfolgt
+  if(!c && now.getMonth() < 7) return extra;
   var box = 'margin:0 0 14px;padding:12px 14px;border:1px solid var(--bdr2);border-radius:var(--r);background:var(--bg2);font-size:13px;color:var(--off);line-height:1.5';
   if(c) {
     var dd = c.day.split("-").reverse().join(".");
-    return '<div style="'+box+'">\uD83D\uDCD8 <strong>Bordbuch '+y+' abgegeben</strong> am '+dd+'.<br>Neue Fahrten z\u00E4hlen f\u00FCr die <strong>Saison '+next+'</strong>.'
+    return extra + '<div style="'+box+'">\uD83D\uDCD8 <strong>Bordbuch '+y+' abgegeben</strong> am '+dd+'.<br>Neue Fahrten z\u00E4hlen f\u00FCr die <strong>Saison '+next+'</strong>.'
       + ' <button type="button" onclick="SCKR.fahrtenbuch.undoSeasonClose(\''+y+'\')" style="background:none;border:none;color:var(--acc);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">R\u00FCckg\u00E4ngig</button></div>';
   }
-  return '<div style="'+box+';display:flex;align-items:center;gap:10px"><div style="flex:1">\uD83D\uDCD8 Bordbuch '+y+' schon abgegeben? Dann z\u00E4hlen neue Fahrten f\u00FCr '+next+'.</div>'
+  return extra + '<div style="'+box+';display:flex;align-items:center;gap:10px"><div style="flex:1">\uD83D\uDCD8 Bordbuch '+y+' schon abgegeben? Dann z\u00E4hlen neue Fahrten f\u00FCr '+next+'.</div>'
     + '<button type="button" class="btn btn-ghost" style="padding:8px 10px;font-size:12px;white-space:nowrap" onclick="SCKR.fahrtenbuch.openSeasonClose()">ABGEGEBEN</button></div>';
 };
 
@@ -14300,14 +14307,28 @@ SCKR.fahrtenbuch.render.stats = function() {
   years.sort().reverse();
 
   var monthNames = ["Jan","Feb","M\u00e4r","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-  var byMonth = {};
-  trips.forEach(function(t){
-    if(!t.date) return;
-    var m = parseInt(t.date.slice(5,7))-1;
-    byMonth[m] = (byMonth[m]||0) + Math.round(P.trip(t));
-  });
+  // Monats-Achse: bei gewählter Saison entlang der Saison (z. B. Nov 2026 – Okt 2027),
+  // sonst Kalendermonate Jan–Dez über alle Jahre
+  var slots = [], byMonth = {};
+  var _season = (st.filterYear && st.filterYear !== "all") ? st.filterYear : null;
+  if(_season) {
+    var _keys = trips.filter(function(t){return t.date;}).map(function(t){return String(t.date).slice(0,7);}).sort();
+    var _start = (_keys.length && _keys[0] < _season+"-01") ? _keys[0] : _season+"-01";
+    var _end = (_keys.length && _keys[_keys.length-1] > _season+"-12") ? _keys[_keys.length-1] : null;
+    var _y = +_start.slice(0,4), _m = +_start.slice(5,7)-1;
+    for(var _i=0; _i<24; _i++) {
+      var _k = _y+"-"+String(_m+1).padStart(2,"0");
+      slots.push({key:_k, label:monthNames[_m]});
+      if(slots.length>=12 && (!_end || _k>=_end)) break;
+      _m++; if(_m>11){_m=0;_y++;}
+    }
+    trips.forEach(function(t){ if(t.date){ var k=String(t.date).slice(0,7); byMonth[k]=(byMonth[k]||0)+Math.round(P.trip(t)); } });
+  } else {
+    for(var _j=0;_j<12;_j++) slots.push({key:_j, label:monthNames[_j]});
+    trips.forEach(function(t){ if(t.date){ var m=parseInt(t.date.slice(5,7))-1; byMonth[m]=(byMonth[m]||0)+Math.round(P.trip(t)); } });
+  }
   var maxPts = 1;
-  for(var mi=0;mi<12;mi++) if((byMonth[mi]||0)>maxPts) maxPts=byMonth[mi];
+  slots.forEach(function(sl){ if((byMonth[sl.key]||0)>maxPts) maxPts=byMonth[sl.key]; });
 
   var ptSegel  = trips.reduce(function(s,t){return s+Math.round(P.sail(t));},0);
   var ptMotor  = trips.reduce(function(s,t){return s+Math.round(P.motor(t));},0);
@@ -14365,10 +14386,10 @@ SCKR.fahrtenbuch.render.stats = function() {
   if(trips.length > 0) {
     // Monatsbezeichnungen immer in --text2, Balken in --acc, leere Slots in --bg3
     var cW=320, cH=120, padL=4, padR=4, padB=28, padT=12;
-    var barW = (cW-padL-padR)/12;
+    var barW = (cW-padL-padR)/slots.length;
     var bars="", labels="";
-    for(var mi2=0;mi2<12;mi2++){
-      var mpts = byMonth[mi2]||0;
+    for(var mi2=0;mi2<slots.length;mi2++){
+      var mpts = byMonth[slots[mi2].key]||0;
       var barH = mpts>0 ? Math.max(6,((mpts/maxPts)*(cH-padT-padB))) : 0;
       var x = padL + mi2*barW;
       // Balken — Leer-Slots dezent, Daten-Balken in Akzentfarbe
@@ -14380,7 +14401,7 @@ SCKR.fahrtenbuch.render.stats = function() {
         +' text-anchor="middle" font-size="8" fill="var(--acc)" font-family="Barlow Condensed,sans-serif" font-weight="800">'+mpts+'</text>';
       // Monatsname — immer var(--text2) damit hell+dunkel lesbar
       labels += '<text x="'+(x+barW/2).toFixed(1)+'" y="'+(cH-6)+'"'
-        +' text-anchor="middle" font-size="8" fill="var(--text2)" font-family="Barlow Condensed,sans-serif">'+monthNames[mi2]+'</text>';
+        +' text-anchor="middle" font-size="8" fill="var(--text2)" font-family="Barlow Condensed,sans-serif">'+slots[mi2].label+'</text>';
     }
     html += '<div class="pnl"><div class="phd"><span class="phd-t">Punkte pro Monat</span></div>'
       +'<div style="padding:10px 14px 8px">'
@@ -16166,7 +16187,6 @@ SCKR.fahrtenbuch.exportExcel = async function() {
   await SCKR.admin.init();
 
   var st = SCKR.fahrtenbuch.state;
-  st.seasonYear = SCKR.fahrtenbuch.seasonFor(new Date());
 
   var p = await SCKR.core.storage.get("profile");
   if(p) { for(var k in p) st.profile[k] = p[k]; }
@@ -16198,7 +16218,8 @@ SCKR.fahrtenbuch.exportExcel = async function() {
   setTimeout(async function(){
     await SCKR.fahrtenbuch._checkInterruptedSession();
     if(!SCKR.fahrtenbuch.state._recoverSnap) await SCKR.fahrtenbuch._checkSeasonRollover();
-    if(SCKR.config.whiteLabel && !SCKR.fahrtenbuch.state._recoverSnap){
+    var _dialogOpen = false; try { _dialogOpen = document.getElementById("sheet-bg").classList.contains("open"); } catch(e){}
+    if(SCKR.config.whiteLabel && !SCKR.fahrtenbuch.state._recoverSnap && !_dialogOpen){   // nicht über die Jahreswechsel-Frage legen
       var _consent; try { _consent = await SCKR.core.storage.get("legal_consent"); } catch(e){}
       if(!_consent || !_consent.v){ SCKR.legal.showConsent(); }
       else { var _done; try { _done = await SCKR.core.storage.get("wl_setup_done"); } catch(e){} if(!_done) SCKR.admin.setupWizard(); }

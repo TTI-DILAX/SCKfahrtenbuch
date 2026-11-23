@@ -1,0 +1,58 @@
+name: Web-App veröffentlichen (getrenntes Repo)
+
+# Nur nötig, wenn dieses Repo PRIVAT wird (siehe docs/VERTEILUNG-UND-PRIVAT.md).
+# Dann liegt der Quellcode hier privat, und nur index.html + sw.js werden in ein
+# kleines öffentliches Repo kopiert, das die Web-App unter derselben Adresse ausliefert
+# (gleiche Adresse = die Daten der Nutzer im Browser bleiben erhalten).
+# Ohne Variable PAGES_REPO und Secret PAGES_DEPLOY_TOKEN macht dieser Workflow nichts.
+
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', 'sw.js']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    env:
+      PAGES_REPO: ${{ vars.PAGES_REPO }}
+      HAS_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN != '' }}
+    steps:
+      - name: Eingerichtet?
+        id: chk
+        run: |
+          if [ -n "$PAGES_REPO" ] && [ "$HAS_TOKEN" = "true" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "Nicht eingerichtet – nichts zu tun."; echo "go=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/checkout@v7
+        if: steps.chk.outputs.go == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        if: steps.chk.outputs.go == 'true'
+        with:
+          node-version: 22
+
+      - name: Prüfen (Syntax, GPS, Saison)
+        if: steps.chk.outputs.go == 'true'
+        run: npm ci --no-audit --no-fund && npm test
+
+      - name: In öffentliches Repo kopieren
+        if: steps.chk.outputs.go == 'true'
+        env:
+          TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+        run: |
+          set -eo pipefail
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${PAGES_REPO}.git" web
+          cp index.html sw.js web/
+          cd web
+          git config user.name "sckr-deploy"
+          git config user.email "sckr-deploy@users.noreply.github.com"
+          git add index.html sw.js
+          if git diff --cached --quiet; then echo "Keine Änderung."; exit 0; fi
+          git commit -m "Web-App aktualisiert (${GITHUB_SHA::7})"
+          git push origin HEAD

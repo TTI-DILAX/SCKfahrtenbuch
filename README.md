@@ -4,7 +4,7 @@ Digitales Fahrtenbuch des Segel-Club Krüpelsee e. V.
 
 - **Web/PWA:** https://tti-dilax.github.io/SCKfahrtenbuch/ (GitHub Pages, `index.html`)
 - **Android-App:** wird per GitHub Actions automatisch aus derselben `index.html` gebaut. Siehe [docs/ANDROID-RELEASE.md](docs/ANDROID-RELEASE.md).
-- **Download für den Verein:** https://github.com/tti-dilax/SCKfahrtenbuch/releases/latest/download/SCKR-Fahrtenbuch.apk
+- **Download für den Verein:** siehe [docs/VERTEILUNG-UND-PRIVAT.md](docs/VERTEILUNG-UND-PRIVAT.md) (öffentlicher Link oder gezielt per Firebase)
 
 ## Wichtig beim Bearbeiten von `index.html`
 - Immer die **aktuelle `index.html` aus diesem Repo** bearbeiten, nie eine ältere lokale Kopie einfügen – sonst werden Fehlerbehebungen überschrieben.
